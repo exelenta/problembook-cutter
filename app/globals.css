@@ -14,6 +14,13 @@
 }
 body {
   margin: 0;
+  overflow-x: hidden;
+}
+.app,
+.editor-root,
+[data-slot='tabs-content'] {
+  width: 100%;
+  min-width: 0;
 }
 button,
 input,
@@ -355,13 +362,26 @@ p {
   color: #235ba9;
 }
 .document-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(180px, 1fr);
   align-items: center;
   justify-content: space-between;
   background: white;
   padding: 14px 24px;
   border-bottom: 1px solid var(--line);
   gap: 15px;
+}
+.review-summary {
+  justify-self: end;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: #697b91;
+  font-size: 13px;
+}
+.review-summary strong {
+  color: #164fb7;
+  font-size: 18px;
 }
 .filename {
   display: flex;
@@ -401,13 +421,20 @@ p {
 }
 .editor-grid {
   display: grid;
-  grid-template-columns: 260px minmax(350px, 1fr) 280px;
-  align-items: start;
+  grid-template-columns: minmax(250px, 290px) minmax(420px, 1fr) minmax(
+      300px,
+      340px
+    );
+  height: calc(100dvh - 145px);
+  min-height: 620px;
+  align-items: stretch;
+  overflow: hidden;
 }
 .problem-panel,
 .inspector {
   background: white;
-  min-height: calc(100vh - 146px);
+  min-height: 0;
+  overflow-y: auto;
 }
 .problem-panel {
   border-right: 1px solid var(--line);
@@ -516,7 +543,7 @@ p {
   width: 100%;
 }
 .block-list {
-  max-height: 600px;
+  max-height: none;
   overflow: auto;
 }
 .block-row {
@@ -594,6 +621,9 @@ p {
 .canvas-panel {
   min-width: 0;
   background: #e9eef4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .canvas-toolbar {
   display: flex;
@@ -605,6 +635,20 @@ p {
   border-bottom: 1px solid var(--line);
   font-size: 13px;
   flex-wrap: wrap;
+}
+.page-status {
+  color: #6b7890;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.page-status.done {
+  color: #1f7a61;
+}
+.review-page-button {
+  background: #1758d5 !important;
+  color: white;
+  border-color: #1758d5 !important;
+  padding: 7px 11px !important;
 }
 .canvas-toolbar button {
   padding: 6px;
@@ -638,10 +682,41 @@ p {
   padding: 6px 16px 12px;
 }
 .canvas-scroll {
-  height: calc(100vh - 305px);
-  min-height: 520px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 20px 30px 40px;
+}
+.page-review-note {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 12px;
+  margin-top: 14px;
+  color: #315377;
+  background: #edf5ff;
+  border: 1px solid #cfe0f7;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.page-review-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+.layout-regions {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  margin: 12px 0;
+  color: #52667e;
+  background: #f4f7fb;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.layout-regions strong {
+  color: #253a53;
+  font-size: 13px;
 }
 .source-sheet {
   position: relative;
@@ -952,7 +1027,7 @@ p {
 }
 @media (min-width: 1650px) {
   .editor-grid {
-    grid-template-columns: 280px minmax(350px, 1fr) 320px;
+    grid-template-columns: 300px minmax(500px, 1fr) 360px;
   }
   .canvas-scroll {
     padding: 20px 60px 50px;
@@ -967,6 +1042,10 @@ p {
     min-height: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+  .editor-grid {
+    height: auto;
+    overflow: visible;
   }
   .canvas-scroll {
     padding: 18px;
@@ -999,6 +1078,9 @@ p {
     align-items: flex-start;
     flex-direction: column;
     padding: 14px;
+  }
+  .review-summary {
+    justify-self: start;
   }
   .editor-grid {
     display: flex;

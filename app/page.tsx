@@ -57,6 +57,7 @@ import {
   edgeWarnings,
   trim,
   uncoveredRegions,
+  inferLayout,
 } from '@/lib/detect';
 import {
   bottom,
@@ -191,15 +192,34 @@ export default function Home() {
     ),
     [guides, setGuides] = useState(true),
     [zoom, setZoom] = useState(100),
-    [filter, setFilter] = useState('all');
+    [filter, setFilter] = useState('page');
   const [settings, setSettings] = useState<Settings>(defaults),
     [tab, setTab] = useState('edit'),
     [output, setOutput] = useState<string>(),
     [outputBytes, setOutputBytes] = useState<Uint8Array>();
   const input = useRef<HTMLInputElement>(null),
     projectInput = useRef<HTMLInputElement>(null);
-  const selected = blocks.filter((b) => b.selected),
-    pending = selected.filter((b) => !b.reviewed),
+  const blockPages = (b: Block) => [...new Set(b.fragments.map((f) => f.page))],
+    reviewedOnPage = (b: Block, n: number) =>
+      b.reviewed || b.reviewedPages?.includes(n) === true,
+    fullyReviewed = (b: Block) =>
+      blockPages(b).every((n) => reviewedOnPage(b, n)),
+    selected = blocks.filter((b) => b.selected),
+    pending = selected.filter((b) => !fullyReviewed(b)),
+    reviewPages = [...new Set(selected.flatMap(blockPages))].sort(
+      (a, b) => a - b,
+    ),
+    pendingPages = reviewPages.filter((n) =>
+      selected.some(
+        (b) => b.fragments.some((f) => f.page === n) && !reviewedOnPage(b, n),
+      ),
+    ),
+    currentPageBlocks = selected.filter((b) =>
+      b.fragments.some((f) => f.page === page),
+    ),
+    currentPageReviewed =
+      currentPageBlocks.length > 0 &&
+      currentPageBlocks.every((b) => reviewedOnPage(b, page)),
     problemCount = selected.filter((b) => b.kind === 'problem').length,
     audit = numberAudit(blocks);
   const current = blocks.find((b) => b.id === active),
@@ -392,6 +412,9 @@ export default function Home() {
         .map((b) => ({
           ...b,
           fragments: b.fragments.filter((f) => !completed.includes(f.page)),
+          reviewedPages: b.reviewedPages?.filter(
+            (savedPage) => !completed.includes(savedPage),
+          ),
           reviewed: b.fragments.some((f) => completed.includes(f.page))
             ? false
             : b.reviewed,
@@ -409,7 +432,7 @@ export default function Home() {
       setFragment(first?.fragments[0]?.id);
       await goPage(from);
       setMessage(
-        `${completed.length}페이지 분석${cancel.current ? ' 중단' : ' 완료'}. 자동 경계는 초안입니다. 공통 지시문과 단·페이지 끝을 반드시 확인하세요.`,
+        `${completed.length}페이지 분석${cancel.current ? ' 중단' : ' 완료'}. 자동 경계는 초안입니다. 페이지별로 원본과 대조한 뒤 한 번에 검토 완료하세요.`,
       );
     } catch (e) {
       report(e);
@@ -433,6 +456,7 @@ export default function Home() {
     update(id, (b) => ({
       ...b,
       reviewed: false,
+      reviewedPages: b.reviewedPages?.filter((n) => n !== page),
       warnings: [
         ...b.warnings.filter((w) => !w.includes('경계가 원본 잉크')),
         ...warnings,
@@ -447,6 +471,7 @@ export default function Home() {
       update(current.id, (b) => ({
         ...b,
         reviewed: false,
+        reviewedPages: [],
         fragments: [...b.fragments, f],
         warnings: [...b.warnings, '직접 연결한 조각의 순서를 확인하세요'],
       }));
@@ -501,6 +526,7 @@ export default function Home() {
       {
         ...current,
         reviewed: false,
+        reviewedPages: [],
         fragments: current.fragments.map((s) => (s.id === fid ? a : s)),
       },
       b,
@@ -521,6 +547,7 @@ export default function Home() {
             ? {
                 ...b,
                 reviewed: false,
+                reviewedPages: [],
                 fragments: [...b.fragments, ...current.fragments],
                 warnings: [
                   ...b.warnings,
@@ -533,33 +560,61 @@ export default function Home() {
     setActive(prev.id);
     setFragment(current.fragments[0].id);
   }
-  async function review() {
-    if (!current) return;
+  async function reviewPage() {
+    if (!currentPageBlocks.length) {
+      setError('현재 페이지에 검토할 영역이 없습니다.');
+      return;
+    }
     setError('');
     try {
       const warnings: string[] = [];
-      for (const f of current.fragments) {
-        const r = await getPage(f.page);
-        warnings.push(...edgeWarnings(r.ink, f.rect));
-      }
+      const r = await getPage(page);
+      for (const b of currentPageBlocks)
+        for (const f of b.fragments.filter((f) => f.page === page))
+          warnings.push(...edgeWarnings(r.ink, f.rect));
       if (warnings.length) {
         setError(
-          '잉크를 가르는 경계가 있습니다. 영역을 넓히거나 여백으로 옮긴 뒤 확인해 주세요.',
+          '이 페이지에 잉크를 가르는 경계가 있습니다. 표시된 영역을 넓히거나 여백으로 옮겨 주세요.',
         );
         return;
       }
-      update(current.id, (b) => ({ ...b, reviewed: true }));
-      const next = blocks
-        .slice(blocks.indexOf(current) + 1)
-        .find((b) => b.selected && !b.reviewed);
-      if (next) selectBlock(next);
+      const nextBlocks = blocks.map((b) => {
+        if (!b.selected || !b.fragments.some((f) => f.page === page)) return b;
+        const reviewedPages = [
+          ...new Set([
+            ...(b.reviewed ? blockPages(b) : (b.reviewedPages ?? [])),
+            page,
+          ]),
+        ];
+        return {
+          ...b,
+          reviewedPages,
+          reviewed: blockPages(b).every((n) => reviewedPages.includes(n)),
+        };
+      });
+      commit(nextBlocks);
+      const nextPage = reviewPages.find(
+        (n) => n > page && pendingPages.includes(n),
+      );
+      const wrapped = pendingPages.find((n) => n !== page);
+      if (nextPage ?? wrapped) void goPage(nextPage ?? wrapped!);
       else
         setMessage(
-          '선택한 영역의 경계 검토가 끝났습니다. 문제집 출력 탭에서 PDF를 생성하세요.',
+          '선택한 모든 페이지의 경계 검토가 끝났습니다. 문제집 출력 탭에서 PDF를 생성하세요.',
         );
     } catch (e) {
       report(e);
     }
+  }
+  function resetAutomaticLayout() {
+    if (!rendered) return;
+    const inferred = inferLayout(
+      rendered.info.width,
+      rendered.info.height,
+      rendered.info.spans,
+      rendered.ink,
+    );
+    changeLayout({ ...rendered.info, ...inferred });
   }
   function changeLayout(info: PageInfo) {
     if (
@@ -608,12 +663,13 @@ export default function Home() {
       filename,
       blocks,
       pages: [...pages.current.values()].map(
-        ({ page, width, height, body, columns }) => ({
+        ({ page, width, height, body, columns, regions }) => ({
           page,
           width,
           height,
           body,
           columns,
+          regions,
         }),
       ),
       settings,
@@ -666,7 +722,7 @@ export default function Home() {
     try {
       if (pending.length)
         throw new Error(
-          `선택한 영역 ${pending.length}개가 아직 검토되지 않았습니다.`,
+          `선택한 ${pendingPages.length}페이지가 아직 검토되지 않았습니다.`,
         );
       for (const b of selected)
         for (const f of b.fragments) {
@@ -756,7 +812,7 @@ export default function Home() {
   const visible = blocks.filter(
     (b) =>
       filter === 'all' ||
-      (filter === 'pending' && b.selected && !b.reviewed) ||
+      (filter === 'pending' && b.selected && !fullyReviewed(b)) ||
       (filter === 'page' && b.fragments.some((f) => f.page === page)),
   );
   let estimated = 0;
@@ -950,6 +1006,10 @@ export default function Home() {
               <TabsTrigger value="edit">01 경계 검토</TabsTrigger>
               <TabsTrigger value="export">02 문제집 출력</TabsTrigger>
             </TabsList>
+            <div className="review-summary" aria-label="페이지 검토 진행률">
+              <strong>{reviewPages.length - pendingPages.length}</strong>
+              <span>/ {reviewPages.length} 페이지 검토</span>
+            </div>
           </div>
           <TabsContent value="edit">
             <div className="editor-grid">
@@ -1024,8 +1084,10 @@ export default function Home() {
                 </div>
                 <div className="panel-section block-heading">
                   <div className="row">
-                    <h3>문제 목록</h3>
-                    <span className="count">{blocks.length}</span>
+                    <h3>페이지별 영역</h3>
+                    <span className="count">
+                      {pendingPages.length}페이지 남음
+                    </span>
                   </div>
                   <Choice
                     label="목록 필터"
@@ -1054,7 +1116,7 @@ export default function Home() {
                     >
                       해제
                     </button>
-                    <span>{pending.length}개 검토 전</span>
+                    <span>{pendingPages.length}페이지 검토 전</span>
                   </div>
                 </div>
                 <div className="block-list">
@@ -1086,7 +1148,7 @@ export default function Home() {
                           <strong>
                             {b.kind === 'problem' ? `문제 ${b.label}` : b.label}
                           </strong>
-                          {b.reviewed ? (
+                          {fullyReviewed(b) ? (
                             <Check className="green" size={15} />
                           ) : (
                             <span className="pending-dot" />
@@ -1126,6 +1188,23 @@ export default function Home() {
               <section className="canvas-panel">
                 <div className="canvas-toolbar">
                   <div className="row">
+                    <span
+                      className={`page-status ${currentPageReviewed ? 'done' : ''}`}
+                    >
+                      {currentPageReviewed
+                        ? '이 페이지 검토 완료'
+                        : `${currentPageBlocks.length}개 영역 확인`}
+                    </span>
+                    <button
+                      className="review-page-button"
+                      disabled={!!busy || !currentPageBlocks.length}
+                      onClick={() => void reviewPage()}
+                    >
+                      <Check size={16} />
+                      {currentPageReviewed
+                        ? '다음 검토 페이지'
+                        : '페이지 검토 완료'}
+                    </button>
                     <button
                       aria-label="이전 페이지"
                       disabled={!!busy || page === 1}
@@ -1293,6 +1372,7 @@ export default function Home() {
                               ...b,
                               label: e.target.value,
                               reviewed: false,
+                              reviewedPages: [],
                             }))
                           }
                         />
@@ -1305,6 +1385,7 @@ export default function Home() {
                             ...b,
                             kind: v as Block['kind'],
                             reviewed: false,
+                            reviewedPages: [],
                           }))
                         }
                         items={[
@@ -1323,6 +1404,7 @@ export default function Home() {
                                 ...b,
                                 range: [v, b.range?.[1] ?? v],
                                 reviewed: false,
+                                reviewedPages: [],
                               }))
                             }
                           />
@@ -1334,6 +1416,7 @@ export default function Home() {
                                 ...b,
                                 range: [b.range?.[0] ?? v, v],
                                 reviewed: false,
+                                reviewedPages: [],
                               }))
                             }
                           />
@@ -1410,23 +1493,21 @@ export default function Home() {
                           </div>
                         </>
                       )}
-                      {current.warnings.length > 0 && !current.reviewed && (
-                        <ul className="warnings">
-                          {[...new Set(current.warnings)].map((w) => (
-                            <li key={w}>{w}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <button
-                        className="primary full"
-                        disabled={!!busy}
-                        onClick={() => void review()}
-                      >
+                      {current.warnings.length > 0 &&
+                        !reviewedOnPage(current, part.page) && (
+                          <ul className="warnings">
+                            {[...new Set(current.warnings)].map((w) => (
+                              <li key={w}>{w}</li>
+                            ))}
+                          </ul>
+                        )}
+                      <div className="page-review-note">
                         <Check size={16} />
-                        {current.reviewed
-                          ? '검토 완료'
-                          : '잘리지 않았음 확인 · 다음'}
-                      </button>
+                        <span>
+                          영역 수정은 여기서 하고, 검토 완료는 가운데 위의
+                          페이지 버튼으로 한 번에 처리합니다.
+                        </span>
+                      </div>
                       <div className="inspector-actions">
                         <button
                           disabled={!!busy || blocks.indexOf(current) === 0}
@@ -1486,6 +1567,7 @@ export default function Home() {
                                           (x) => x.id !== f.id,
                                         ),
                                         reviewed: false,
+                                        reviewedPages: [],
                                       }
                                     : s,
                                 ),
@@ -1540,6 +1622,7 @@ export default function Home() {
                               x,
                               w: right(rendered.info.body) - x,
                             },
+                            regions: undefined,
                           })
                         }
                       />
@@ -1555,6 +1638,7 @@ export default function Home() {
                               ...rendered.info.body,
                               w: x - rendered.info.body.x,
                             },
+                            regions: undefined,
                           })
                         }
                       />
@@ -1570,6 +1654,7 @@ export default function Home() {
                               y,
                               h: bottom(rendered.info.body) - y,
                             },
+                            regions: undefined,
                           })
                         }
                       />
@@ -1585,12 +1670,13 @@ export default function Home() {
                               ...rendered.info.body,
                               h: y - rendered.info.body.y,
                             },
+                            regions: undefined,
                           })
                         }
                       />
                     </div>
                     <Choice
-                      label="원본 단 개수"
+                      label="페이지 전체 단 개수"
                       value={String(rendered.info.columns.length + 1)}
                       onChange={(v) =>
                         changeLayout({
@@ -1602,6 +1688,18 @@ export default function Home() {
                                   rendered.info.body.x +
                                     rendered.info.body.w / 2,
                                 ],
+                          regions: [
+                            {
+                              ...rendered.info.body,
+                              columns:
+                                v === '1'
+                                  ? []
+                                  : [
+                                      rendered.info.body.x +
+                                        rendered.info.body.w / 2,
+                                    ],
+                            },
+                          ],
                         })
                       }
                       items={[
@@ -1609,6 +1707,26 @@ export default function Home() {
                         ['2', '원본 2단'],
                       ]}
                     />
+                    {rendered.info.regions &&
+                      rendered.info.regions.length > 1 && (
+                        <div className="layout-regions">
+                          <strong>혼합 레이아웃 감지</strong>
+                          {rendered.info.regions.map((region, i) => (
+                            <span key={`${region.y}-${i}`}>
+                              구간 {i + 1} · y {Math.round(region.y)}–
+                              {Math.round(region.y + region.h)} · 원본{' '}
+                              {region.columns.length + 1}단
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    <button
+                      className="full"
+                      disabled={!!busy}
+                      onClick={resetAutomaticLayout}
+                    >
+                      1단·2단 혼합 자동 감지
+                    </button>
                     {rendered.info.columns.length > 0 && (
                       <NumberField
                         label="중앙 경계 (pt)"
@@ -1616,7 +1734,14 @@ export default function Home() {
                         min={rendered.info.body.x + 5}
                         max={right(rendered.info.body) - 5}
                         onChange={(x) =>
-                          changeLayout({ ...rendered.info, columns: [x] })
+                          changeLayout({
+                            ...rendered.info,
+                            columns: [x],
+                            regions: rendered.info.regions?.map((region) => ({
+                              ...region,
+                              columns: region.columns.length ? [x] : [],
+                            })),
+                          })
                         }
                       />
                     )}
@@ -1709,14 +1834,14 @@ export default function Home() {
                     <span>예상 페이지</span>
                   </div>
                   <div>
-                    <strong>{pending.length}</strong>
-                    <span>검토할 영역</span>
+                    <strong>{pendingPages.length}</strong>
+                    <span>검토할 페이지</span>
                   </div>
                 </div>
                 {pending.length > 0 && (
                   <p className="warnings">
-                    원본 잘림을 막기 위해 선택한 모든 영역을 검토한 후 출력할 수
-                    있습니다.
+                    원본 잘림을 막기 위해 선택한 {pendingPages.length}페이지를
+                    검토한 후 출력할 수 있습니다.
                   </p>
                 )}
                 <button

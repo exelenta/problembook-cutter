@@ -16,7 +16,7 @@ import {
 import { exportBook, layoutBook } from '../lib/export';
 import { demoPdf } from '../lib/demo';
 import { validateProject } from '../lib/project';
-import type { Block, Span, Settings } from '../lib/model';
+import type { Block, Ink, PageInfo, Span, Settings } from '../lib/model';
 
 const require = createRequire(import.meta.url),
   pdfRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
@@ -34,7 +34,8 @@ const doc = await getDocument({
   cMapPacked: true,
 }).promise;
 await fs.mkdir('test-output', { recursive: true });
-const all: Block[] = [];
+const all: Block[] = [],
+  infos: PageInfo[] = [];
 for (let page = 1; page <= doc.numPages; page++) {
   const p = await doc.getPage(page),
     vp = p.getViewport({ scale: 1 }),
@@ -73,6 +74,7 @@ for (let page = 1; page <= doc.numPages; page++) {
     spans,
     ...inferLayout(vp.width, vp.height, spans, ink),
   };
+  infos.push(info);
   const blocks = detectPage(info, ink);
   all.push(...blocks);
   console.log(
@@ -134,7 +136,7 @@ for (let page = 1; page <= doc.numPages; page++) {
       uncoveredRegions(info, ink, blocks.slice(1)).length > 0,
       'Deleted block is found by coverage audit',
     );
-  if (filename) {
+  if (filename && doc.numPages === 1) {
     const q29 = blocks.find((b) => b.label === '29')!.fragments[0].rect;
     const lastLine = spans.find(
       (t) => t.x > 330 && t.y < 140 && t.text.includes('is a solution'),
@@ -147,12 +149,75 @@ for (let page = 1; page <= doc.numPages; page++) {
 }
 const blocks = linkContinuations(all),
   audit = numberAudit(blocks);
+
+// A synthetic inverted-T page: two columns above, one full-width band below.
+const syntheticInk: Ink = {
+    width: 1200,
+    height: 1600,
+    scale: 2,
+    data: new Uint8Array(1200 * 1600),
+  },
+  syntheticSpans: Span[] = [
+    { text: '1.', x: 40, y: 100, w: 12, h: 10, baseline: 110, font: 'bold' },
+    { text: '2.', x: 330, y: 100, w: 12, h: 10, baseline: 110, font: 'bold' },
+    { text: '3.', x: 40, y: 300, w: 12, h: 10, baseline: 310, font: 'bold' },
+    { text: '4.', x: 330, y: 300, w: 12, h: 10, baseline: 310, font: 'bold' },
+    {
+      text: 'Shared full-width instruction at the bottom',
+      x: 40,
+      y: 600,
+      w: 500,
+      h: 10,
+      baseline: 610,
+      font: 'regular',
+    },
+  ];
+for (const span of syntheticSpans)
+  for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
+    syntheticInk.data.fill(
+      1,
+      y * syntheticInk.width + span.x * 2,
+      y * syntheticInk.width + (span.x + span.w) * 2,
+    );
+const invertedT = inferLayout(600, 800, syntheticSpans, syntheticInk);
+assert.ok(
+  invertedT.regions?.[0].columns.length === 1 &&
+    invertedT.regions.at(-1)?.columns.length === 0,
+  'Mixed layout supports two columns changing to one column',
+);
 if (filename) {
+  const expected =
+    doc.numPages === 4
+      ? Array.from({ length: 64 }, (_, i) => i + 1)
+      : Array.from({ length: 35 }, (_, i) => i + 12);
   assert.deepEqual(
     blocks.filter((b) => b.kind === 'problem').map((b) => +b.label),
-    Array.from({ length: 35 }, (_, i) => 12 + i),
+    expected,
   );
   assert.deepEqual(audit, { missing: [], duplicates: [] });
+  if (doc.numPages === 4) {
+    assert.ok(infos[0].body.y > 450, 'Previous concept is excluded on page 1');
+    assert.ok(
+      infos[0].regions?.some((r) => r.columns.length === 0) &&
+        infos[0].regions?.some((r) => r.columns.length === 1),
+      'Page 1 keeps both full-width and two-column regions',
+    );
+    assert.ok(
+      infos[3].body.y + infos[3].body.h < 360,
+      'Following concept is excluded on page 4',
+    );
+    assert.equal(
+      blocks.filter((b) => b.kind === 'problem' && b.label === '54').length,
+      1,
+      'Problem 54 remains a problem',
+    );
+    assert.equal(
+      blocks.find((b) => b.kind === 'instruction' && b.range?.[0] === 63)
+        ?.fragments.length,
+      2,
+      'A common instruction can continue into the next source column',
+    );
+  }
 } else {
   assert.equal(
     blocks.find((b) => b.label === '4')?.fragments.length,

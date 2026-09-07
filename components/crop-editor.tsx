@@ -151,14 +151,29 @@ export function CropEditor({
               width={info.body.w}
               height={info.body.h}
             />
-            {info.columns.map((x) => (
-              <line
-                key={x}
-                x1={x}
-                x2={x}
-                y1={info.body.y}
-                y2={bottom(info.body)}
-              />
+            {(info.regions?.length
+              ? info.regions
+              : [{ ...info.body, columns: info.columns }]
+            ).map((region, i) => (
+              <g key={`${region.y}-${i}`}>
+                {i > 0 && (
+                  <line
+                    x1={region.x}
+                    x2={right(region)}
+                    y1={region.y}
+                    y2={region.y}
+                  />
+                )}
+                {region.columns.map((x) => (
+                  <line
+                    key={x}
+                    x1={x}
+                    x2={x}
+                    y1={region.y}
+                    y2={bottom(region)}
+                  />
+                ))}
+              </g>
             ))}
           </g>
         )}
@@ -173,7 +188,7 @@ export function CropEditor({
               return (
                 <g
                   key={f.id}
-                  className={`crop ${b.kind} ${b.selected ? '' : 'excluded'} ${b.reviewed ? 'reviewed' : ''} ${isActive ? 'active' : ''}`}
+                  className={`crop ${b.kind} ${b.selected ? '' : 'excluded'} ${b.reviewed || b.reviewedPages?.includes(f.page) ? 'reviewed' : ''} ${isActive ? 'active' : ''}`}
                   style={{
                     pointerEvents:
                       mode === 'add' || mode === 'append' ? 'none' : undefined,
@@ -229,4 +244,3 @@ export function CropEditor({
     </div>
   );
 }
-

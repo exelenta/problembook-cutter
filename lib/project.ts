@@ -4,7 +4,10 @@ export type SavedProject = {
   fingerprint: string;
   filename: string;
   blocks: Block[];
-  pages: Pick<PageInfo, 'page' | 'width' | 'height' | 'body' | 'columns'>[];
+  pages: Pick<
+    PageInfo,
+    'page' | 'width' | 'height' | 'body' | 'columns' | 'regions'
+  >[];
   settings: Settings;
 };
 export function validateProject(
@@ -40,7 +43,21 @@ export function validateProject(
           !Number.isFinite(x) ||
           x <= page.body.x ||
           x >= page.body.x + page.body.w,
-      )
+      ) ||
+      (page.regions !== undefined &&
+        (!Array.isArray(page.regions) ||
+          !page.regions.length ||
+          page.regions.some(
+            (region) =>
+              !validRect(region, page.width, page.height) ||
+              !Array.isArray(region.columns) ||
+              region.columns.some(
+                (x) =>
+                  !Number.isFinite(x) ||
+                  x <= region.x ||
+                  x >= region.x + region.w,
+              ),
+          )))
     )
       throw new Error('페이지 설정이 올바르지 않습니다.');
   for (const b of p.blocks) {
@@ -51,6 +68,11 @@ export function validateProject(
       typeof b.label !== 'string' ||
       typeof b.selected !== 'boolean' ||
       typeof b.reviewed !== 'boolean' ||
+      (b.reviewedPages !== undefined &&
+        (!Array.isArray(b.reviewedPages) ||
+          b.reviewedPages.some(
+            (page) => !Number.isInteger(page) || page < 1 || page > pageCount,
+          ))) ||
       !Array.isArray(b.warnings) ||
       b.warnings.some((w) => typeof w !== 'string') ||
       !Array.isArray(b.fragments) ||

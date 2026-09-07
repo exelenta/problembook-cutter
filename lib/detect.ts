@@ -4,6 +4,7 @@ import {
   uid,
   type Block,
   type Ink,
+  type LayoutRegion,
   type PageInfo,
   type Rect,
   type Span,
@@ -128,15 +129,98 @@ export function inferLayout(
   height: number,
   spans: Span[],
   ink: Ink,
-): Pick<PageInfo, 'body' | 'columns'> {
-  // Exclude running headers/footers conservatively; user can move every limit.
+): Pick<PageInfo, 'body' | 'columns' | 'regions'> {
+  // Exclude running headers/footers conservatively, then look for exercise and
+  // following-section landmarks. A page may change column count partway down.
   const initial = {
     x: width * 0.035,
     y: height * 0.068,
     w: width * 0.93,
     h: height * 0.89,
   };
-  const body = trim(ink, initial, 4);
+  const initialRuns = textRuns(spans, initial);
+  const exercise = initialRuns.find((run) =>
+    /^EXERCISES?\b/.test(run.text.trim()),
+  );
+  const initialNumbers = spans
+    .filter(
+      (span) =>
+        Number(span.text.trim().match(/^(\d{1,3})[.)](?:\s|$)/)?.[1]) > 0 &&
+        span.baseline >= initial.y &&
+        span.baseline < bottom(initial),
+    )
+    .sort((a, b) => a.baseline - b.baseline);
+  let top = initial.y,
+    end = bottom(initial);
+  if (exercise)
+    top = safeCut(ink, initial, 'y', Math.max(initial.y, exercise.y - 4), 28);
+  else if (
+    initialNumbers[0] &&
+    initialNumbers[0].baseline > initial.y + initial.h * 0.35
+  ) {
+    const whitespace = gaps(
+      projection(ink, initial, 'y'),
+      initial.y,
+      initialNumbers[0].y - 4,
+      ink.scale,
+    ).filter((gap) => gap.b - gap.a >= 10);
+    whitespace.sort((a, b) => b.b - b.a - (a.b - a.a));
+    if (whitespace[0]) top = (whitespace[0].a + whitespace[0].b) / 2;
+  }
+  const section =
+    initialRuns.find(
+      (run) =>
+        run.y > top + 70 &&
+        /^\s*\d+\.\d+\s+[A-Z][\p{L}-]+/u.test(run.text) &&
+        run.h >= 14,
+    ) ??
+    spans.find(
+      (span) =>
+        span.y > top + 70 &&
+        /^\d+\.\d+$/.test(span.text.trim()) &&
+        span.h >= 14 &&
+        spans.some(
+          (title) =>
+            title.x > right(span) &&
+            Math.abs(title.baseline - span.baseline) < 3 &&
+            title.h >= 12 &&
+            /^[A-Z][\p{L}-]+/u.test(title.text.trim()),
+        ),
+    );
+  if (section) {
+    let wanted = Math.max(top + 20, section.y - 6);
+    const scanTop = Math.max(top, section.y - 70) * ink.scale,
+      scanBottom = section.y * ink.scale,
+      x0 = Math.max(0, Math.floor(initial.x * ink.scale)),
+      x1 = Math.min(ink.width, Math.ceil(right(initial) * ink.scale)),
+      ruleWidth = initial.w * ink.scale * 0.35;
+    for (
+      let y = Math.floor(scanTop);
+      y < Math.min(ink.height, scanBottom);
+      y++
+    ) {
+      let run = 0,
+        longest = 0;
+      for (let x = x0; x < x1; x++) {
+        if (ink.data[y * ink.width + x]) {
+          run++;
+          longest = Math.max(longest, run);
+        } else run = 0;
+      }
+      if (longest >= ruleWidth) {
+        wanted = y / ink.scale - 2;
+        break;
+      }
+    }
+    end = safeCut(
+      ink,
+      { ...initial, y: top, h: bottom(initial) - top },
+      'y',
+      wanted,
+      wanted < section.y - 10 ? 10 : 36,
+    );
+  }
+  const body = trim(ink, { ...initial, y: top, h: Math.max(20, end - top) }, 4);
   const nums = spans.filter(
     (t) =>
       /^\d{1,3}[.)](?:\s|$)/.test(t.text.trim()) &&
@@ -157,7 +241,99 @@ export function inferLayout(
     ink.scale,
   ).filter((g) => g.b - g.a >= 4);
   gs.sort((a, b) => b.b - b.a - (a.b - a.a));
-  return { body, columns: gs.length ? [(gs[0].a + gs[0].b) / 2] : [] };
+  const divider =
+    second !== undefined ? center : gs[0] ? (gs[0].a + gs[0].b) / 2 : undefined;
+  if (divider === undefined)
+    return { body, columns: [], regions: [{ ...body, columns: [] }] };
+
+  // Full-width text runs and long rules identify bands that cross the gutter.
+  // Ordinary two-column equations may touch the gutter by a glyph or two, so
+  // center occupancy alone is intentionally not enough.
+  const candidates = textRuns(spans, body)
+    .filter(
+      (run) =>
+        run.x < divider - 14 &&
+        right(run) > divider + 14 &&
+        run.w > body.w * 0.32,
+    )
+    .map((run) => ({
+      a: Math.max(body.y, run.y - 3),
+      b: Math.min(bottom(body), bottom(run) + 3),
+    }));
+  const longRuleThreshold = body.w * ink.scale * 0.35,
+    bodyX0 = Math.max(0, Math.floor(body.x * ink.scale)),
+    bodyX1 = Math.min(ink.width, Math.ceil(right(body) * ink.scale));
+  let ruleStart = -1;
+  for (
+    let y = Math.max(0, Math.floor(body.y * ink.scale));
+    y < Math.min(ink.height, Math.ceil(bottom(body) * ink.scale));
+    y++
+  ) {
+    let run = 0,
+      longest = 0;
+    for (let x = bodyX0; x < bodyX1; x++) {
+      if (ink.data[y * ink.width + x]) {
+        run++;
+        longest = Math.max(longest, run);
+      } else run = 0;
+    }
+    const isRule = longest >= longRuleThreshold;
+    if (isRule && ruleStart < 0) ruleStart = y;
+    if (!isRule && ruleStart >= 0) {
+      candidates.push({
+        a: Math.max(body.y, ruleStart / ink.scale - 3),
+        b: Math.min(bottom(body), y / ink.scale + 3),
+      });
+      ruleStart = -1;
+    }
+  }
+  if (ruleStart >= 0)
+    candidates.push({
+      a: Math.max(body.y, ruleStart / ink.scale - 3),
+      b: bottom(body),
+    });
+  candidates.sort((a, b) => a.a - b.a);
+  const fullWidthBands: { a: number; b: number }[] = [];
+  for (const candidate of candidates) {
+    const previous = fullWidthBands.at(-1);
+    if (previous && candidate.a - previous.b <= 10)
+      previous.b = Math.max(previous.b, candidate.b);
+    else fullWidthBands.push({ ...candidate });
+  }
+
+  const regions: LayoutRegion[] = [];
+  let cursor = body.y;
+  const push = (a: number, b: number, columns: number[]) => {
+    if (b - a < 2) return;
+    const previous = regions.at(-1);
+    if (
+      previous &&
+      previous.columns.length === columns.length &&
+      previous.columns.every((x, i) => Math.abs(x - columns[i]) < 0.1)
+    ) {
+      previous.h = b - previous.y;
+      return;
+    }
+    regions.push({ x: body.x, y: a, w: body.w, h: b - a, columns });
+  };
+  for (const band of fullWidthBands) {
+    const a = safeCut(ink, body, 'y', band.a, 7),
+      b = safeCut(ink, body, 'y', band.b, 7);
+    push(cursor, Math.max(cursor, a), [divider]);
+    push(Math.max(cursor, a), Math.max(a + 2, b), []);
+    cursor = Math.max(cursor, b);
+  }
+  push(cursor, bottom(body), [divider]);
+  const useful = regions.filter((r) => r.h >= 4);
+  if (!useful.length) useful.push({ ...body, columns: [divider] });
+  const twoColumnHeight = useful
+    .filter((r) => r.columns.length)
+    .reduce((sum, r) => sum + r.h, 0);
+  return {
+    body,
+    columns: twoColumnHeight >= body.h / 2 ? [divider] : [],
+    regions: useful,
+  };
 }
 type Event = {
   span: Span;
@@ -165,6 +341,64 @@ type Event = {
   label: string;
   range?: [number, number];
 };
+type TextRun = Rect & {
+  baseline: number;
+  text: string;
+  font: string;
+  spans: Span[];
+};
+function textRuns(spans: Span[], r: Rect): TextRun[] {
+  const inside = spans
+    .filter(
+      (t) =>
+        t.x >= r.x &&
+        t.x < right(r) &&
+        t.baseline >= r.y &&
+        t.baseline < bottom(r),
+    )
+    .sort((a, b) => a.baseline - b.baseline || a.x - b.x);
+  const rows: Span[][] = [];
+  for (const span of inside) {
+    const row = rows.findLast(
+      (candidate) => Math.abs(candidate[0].baseline - span.baseline) < 3,
+    );
+    if (row) row.push(span);
+    else rows.push([span]);
+  }
+  const runs: TextRun[] = [];
+  for (const row of rows) {
+    row.sort((a, b) => a.x - b.x);
+    let group: Span[] = [];
+    const flush = () => {
+      if (!group.length) return;
+      const x = Math.min(...group.map((s) => s.x)),
+        y = Math.min(...group.map((s) => s.y)),
+        end = Math.max(...group.map(right)),
+        low = Math.max(...group.map(bottom));
+      runs.push({
+        x,
+        y,
+        w: end - x,
+        h: low - y,
+        baseline: group[0].baseline,
+        text: group
+          .map((s) => s.text.trim())
+          .filter(Boolean)
+          .join(' '),
+        font: group.map((s) => s.font).join(' '),
+        spans: group,
+      });
+      group = [];
+    };
+    for (const span of row) {
+      const prior = group.at(-1);
+      if (prior && span.x - right(prior) > Math.max(8, r.w * 0.015)) flush();
+      group.push(span);
+    }
+    flush();
+  }
+  return runs;
+}
 function events(spans: Span[], r: Rect): Event[] {
   const inside = spans.filter(
     (t) =>
@@ -192,7 +426,15 @@ function events(spans: Span[], r: Rect): Event[] {
         /bold|black|demi/i.test(t.font))
     )
       es.push({ span: t, kind: 'problem', label: m[1] });
-    else if (/^In\s+(?:Problems?|Exercises?)\s+\d/i.test(text)) {
+    else if (
+      /^In\s+(?:Problems?|Exercises?)\s+\d/i.test(text) &&
+      !inside.some(
+        (s) =>
+          s.x < t.x &&
+          Math.abs(s.baseline - t.baseline) < 3 &&
+          /^\d{1,3}[.)](?:\s|$)/.test(s.text.trim()),
+      )
+    ) {
       const line = inside
         .filter((s) => Math.abs(s.baseline - t.baseline) < 3 && s.x >= t.x)
         .sort((a, b) => a.x - b.x)
@@ -208,11 +450,28 @@ function events(spans: Span[], r: Rect): Event[] {
         range: range ? [+range[1], +range[2]] : undefined,
       });
     } else if (
-      /^(?:Discussion Problems|Computer Lab|Exercises?\s*\d|Answers\b|Chapter\s+\d)/i.test(
+      /^(?:Discussion Problems|Computer Lab Assignments|Exercises?\s*\d|Answers\b|Chapter\s+\d)/i.test(
         text,
       )
     )
       es.push({ span: t, kind: 'instruction', label: text });
+  }
+  for (const run of textRuns(inside, r)) {
+    if (
+      (/^EXERCISES?\b/.test(run.text.trim()) ||
+        /^(?:Discussion Problems|Computer Lab Assignments)/i.test(run.text)) &&
+      !es.some(
+        (e) =>
+          e.kind === 'instruction' &&
+          Math.abs(e.span.baseline - run.baseline) < 3 &&
+          Math.abs(e.span.x - run.x) < 3,
+      )
+    )
+      es.push({
+        span: { ...run, text: run.text },
+        kind: 'instruction',
+        label: run.text,
+      });
   }
   return es
     .filter(
@@ -235,87 +494,99 @@ function events(spans: Span[], r: Rect): Event[] {
 }
 export function detectPage(info: PageInfo, ink: Ink): Block[] {
   const blocks: Block[] = [];
-  const bounds = [
-    info.body.x,
-    ...info.columns
-      .filter((x) => x > info.body.x && x < right(info.body))
-      .sort((a, b) => a - b),
-    right(info.body),
+  const regions = info.regions?.filter((r) => r.h > 0) ?? [
+    { ...info.body, columns: info.columns },
   ];
-  for (let c = 0; c < bounds.length - 1; c++) {
-    const col = { ...info.body, x: bounds[c], w: bounds[c + 1] - bounds[c] };
-    const es = events(info.spans, col);
-    const make = (r: Rect, e?: Event, extra: string[] = []) => {
-      const crop = trim(ink, r, 2);
-      if (!projection(ink, crop, 'y').some((v) => v > 0)) return;
-      blocks.push({
-        id: uid(),
-        label: e?.label ?? '이어짐 / 미분류',
-        kind: e?.kind ?? 'unassigned',
-        range: e?.range,
-        fragments: [{ id: uid(), page: info.page, rect: crop }],
-        selected: true,
-        reviewed: false,
-        warnings: [...edgeWarnings(ink, crop), ...extra],
+  for (const region of regions) {
+    const bounds = [
+      region.x,
+      ...region.columns
+        .filter((x) => x > region.x && x < right(region))
+        .sort((a, b) => a - b),
+      right(region),
+    ];
+    for (let c = 0; c < bounds.length - 1; c++) {
+      const col = { ...region, x: bounds[c], w: bounds[c + 1] - bounds[c] };
+      const es = events(info.spans, col);
+      const make = (r: Rect, e?: Event, extra: string[] = []) => {
+        const crop = trim(ink, r, 2);
+        if (!projection(ink, crop, 'y').some((v) => v > 0)) return;
+        const label =
+          e &&
+          /^Answers\b/i.test(e.label) &&
+          region === regions[0] &&
+          region.columns.length === 0
+            ? '연습문제 머리말'
+            : (e?.label ?? '이어짐 / 미분류');
+        blocks.push({
+          id: uid(),
+          label,
+          kind: e?.kind ?? 'unassigned',
+          range: e?.range,
+          fragments: [{ id: uid(), page: info.page, rect: crop }],
+          selected: true,
+          reviewed: false,
+          warnings: [...edgeWarnings(ink, crop), ...extra],
+        });
+      };
+      if (!es.length) {
+        make(col, undefined, [
+          '문제 번호를 찾지 못했습니다. 영역을 직접 분할하세요',
+        ]);
+        continue;
+      }
+      const rows: Event[][] = [];
+      for (const e of es) {
+        const last = rows.at(-1);
+        if (
+          last &&
+          Math.abs(last[0].span.baseline - e.span.baseline) < 4 &&
+          e.kind === 'problem' &&
+          last[0].kind === 'problem'
+        )
+          last.push(e);
+        else rows.push([e]);
+      }
+      const ys = projection(ink, col, 'y');
+      const cuts = rows.map((row, i) => {
+        const baseline = row[0].span.baseline,
+          prev = i ? rows[i - 1][0].span.baseline : col.y;
+        const gs = gaps(
+          ys,
+          prev + (i ? 4 : 0),
+          baseline - Math.max(5, row[0].span.h * 0.9),
+          ink.scale,
+        ).filter((g) => g.b - g.a >= 1.5);
+        // Prefer the last substantial band. Earlier gaps may be inside a problem.
+        const substantial = gs.filter((g) => g.b - g.a >= 3);
+        const gap =
+          substantial.at(-1) ?? gs.sort((a, b) => b.b - b.a - (a.b - a.a))[0];
+        return gap ? (gap.a + gap.b) / 2 : Math.max(col.y, row[0].span.y - 5);
       });
-    };
-    if (!es.length) {
-      make(col, undefined, [
-        '문제 번호를 찾지 못했습니다. 영역을 직접 분할하세요',
-      ]);
-      continue;
-    }
-    const rows: Event[][] = [];
-    for (const e of es) {
-      const last = rows.at(-1);
-      if (
-        last &&
-        Math.abs(last[0].span.baseline - e.span.baseline) < 4 &&
-        e.kind === 'problem' &&
-        last[0].kind === 'problem'
-      )
-        last.push(e);
-      else rows.push([e]);
-    }
-    const ys = projection(ink, col, 'y');
-    const cuts = rows.map((row, i) => {
-      const baseline = row[0].span.baseline,
-        prev = i ? rows[i - 1][0].span.baseline : col.y;
-      const gs = gaps(
-        ys,
-        prev + (i ? 4 : 0),
-        baseline - Math.max(5, row[0].span.h * 0.9),
-        ink.scale,
-      ).filter((g) => g.b - g.a >= 1.5);
-      // Prefer the last substantial band. Earlier gaps may be inside a problem.
-      const substantial = gs.filter((g) => g.b - g.a >= 3);
-      const gap =
-        substantial.at(-1) ?? gs.sort((a, b) => b.b - b.a - (a.b - a.a))[0];
-      return gap ? (gap.a + gap.b) / 2 : Math.max(col.y, row[0].span.y - 5);
-    });
-    if (cuts[0] > col.y + 2)
-      make({ ...col, h: cuts[0] - col.y }, undefined, [
-        '단 또는 페이지 앞부분입니다. 이전 문제와 이어지는지 확인하세요',
-      ]);
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i],
-        y = cuts[i],
-        end = cuts[i + 1] ?? bottom(col),
-        r = { ...col, y, h: Math.max(1, end - y) };
-      const splits = [col.x];
-      for (let j = 1; j < row.length; j++)
-        splits.push(safeCut(ink, r, 'x', row[j].span.x - 6, 14));
-      splits.push(right(col));
-      row.forEach((e, j) =>
-        make({ ...r, x: splits[j], w: splits[j + 1] - splits[j] }, e, [
-          ...(i === rows.length - 1 && e.kind === 'problem'
-            ? ['단 끝 문제: 다음 단·페이지와 이어지는지 확인하세요']
-            : []),
-          ...(row.length > 1
-            ? ['한 줄에 나란히 놓인 문제: 가운데 경계를 확인하세요']
-            : []),
-        ]),
-      );
+      if (cuts[0] > col.y + 2)
+        make({ ...col, h: cuts[0] - col.y }, undefined, [
+          '단 또는 페이지 앞부분입니다. 이전 문제와 이어지는지 확인하세요',
+        ]);
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i],
+          y = cuts[i],
+          end = cuts[i + 1] ?? bottom(col),
+          r = { ...col, y, h: Math.max(1, end - y) };
+        const splits = [col.x];
+        for (let j = 1; j < row.length; j++)
+          splits.push(safeCut(ink, r, 'x', row[j].span.x - 6, 14));
+        splits.push(right(col));
+        row.forEach((e, j) =>
+          make({ ...r, x: splits[j], w: splits[j + 1] - splits[j] }, e, [
+            ...(i === rows.length - 1 && e.kind === 'problem'
+              ? ['단 끝 문제: 다음 단·페이지와 이어지는지 확인하세요']
+              : []),
+            ...(row.length > 1
+              ? ['한 줄에 나란히 놓인 문제: 가운데 경계를 확인하세요']
+              : []),
+          ]),
+        );
+      }
     }
   }
   return blocks;
@@ -326,7 +597,8 @@ export function linkContinuations(blocks: Block[]): Block[] {
     const prev = out.at(-1);
     if (
       b.kind === 'unassigned' &&
-      prev?.kind === 'problem' &&
+      prev &&
+      prev.kind !== 'unassigned' &&
       b.warnings.some((w) => w.includes('앞부분'))
     ) {
       out[out.length - 1] = {
@@ -335,7 +607,7 @@ export function linkContinuations(blocks: Block[]): Block[] {
         reviewed: false,
         warnings: [
           ...prev.warnings,
-          '이어지는 조각을 임시 연결했습니다. 연결이 맞는지 확인하세요',
+          `${prev.kind === 'instruction' ? '공통 지시문' : '문제'}의 이어지는 조각을 임시 연결했습니다. 연결이 맞는지 확인하세요`,
         ],
       };
     } else out.push(b);
@@ -383,51 +655,56 @@ export function uncoveredRegions(
           y * width + Math.min(width, Math.ceil(right(r) * s)),
         );
     }
-  const bounds = [info.body.x, ...info.columns, right(info.body)],
+  const regions = info.regions?.length
+      ? info.regions
+      : [{ ...info.body, columns: info.columns }],
     out: Rect[] = [];
-  for (let c = 0; c < bounds.length - 1; c++) {
-    let minX = width,
-      maxX = 0,
-      minY = -1,
-      maxY = 0,
-      count = 0;
-    const flush = () => {
-      if (minY >= 0 && count >= 4)
-        out.push({
-          x: Math.max(bounds[c], minX / s - 1),
-          y: Math.max(info.body.y, minY / s - 1),
-          w:
-            Math.min(bounds[c + 1], (maxX + 1) / s + 1) -
-            Math.max(bounds[c], minX / s - 1),
-          h:
-            Math.min(bottom(info.body), (maxY + 1) / s + 1) -
-            Math.max(info.body.y, minY / s - 1),
-        });
-      minX = width;
-      maxX = 0;
-      minY = -1;
-      count = 0;
-    };
-    for (
-      let y = Math.floor(info.body.y * s);
-      y < Math.min(height, Math.ceil(bottom(info.body) * s));
-      y++
-    ) {
-      if (minY >= 0 && y - maxY > s * 7) flush();
+  for (const region of regions) {
+    const bounds = [region.x, ...region.columns, right(region)];
+    for (let c = 0; c < bounds.length - 1; c++) {
+      let minX = width,
+        maxX = 0,
+        minY = -1,
+        maxY = 0,
+        count = 0;
+      const flush = () => {
+        if (minY >= 0 && count >= 4)
+          out.push({
+            x: Math.max(bounds[c], minX / s - 1),
+            y: Math.max(region.y, minY / s - 1),
+            w:
+              Math.min(bounds[c + 1], (maxX + 1) / s + 1) -
+              Math.max(bounds[c], minX / s - 1),
+            h:
+              Math.min(bottom(region), (maxY + 1) / s + 1) -
+              Math.max(region.y, minY / s - 1),
+          });
+        minX = width;
+        maxX = 0;
+        minY = -1;
+        count = 0;
+      };
       for (
-        let x = Math.max(0, Math.floor(bounds[c] * s));
-        x < Math.min(width, Math.ceil(bounds[c + 1] * s));
-        x++
-      )
-        if (data[y * width + x] && !covered[y * width + x]) {
-          minX = Math.min(minX, x);
-          maxX = Math.max(maxX, x);
-          if (minY < 0) minY = y;
-          maxY = y;
-          count++;
-        }
+        let y = Math.floor(region.y * s);
+        y < Math.min(height, Math.ceil(bottom(region) * s));
+        y++
+      ) {
+        if (minY >= 0 && y - maxY > s * 7) flush();
+        for (
+          let x = Math.max(0, Math.floor(bounds[c] * s));
+          x < Math.min(width, Math.ceil(bounds[c + 1] * s));
+          x++
+        )
+          if (data[y * width + x] && !covered[y * width + x]) {
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            if (minY < 0) minY = y;
+            maxY = y;
+            count++;
+          }
+      }
+      flush();
     }
-    flush();
   }
   return out;
 }

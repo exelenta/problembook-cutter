@@ -14,9 +14,11 @@ export type Block = {
   fragments: Fragment[];
   selected: boolean;
   reviewed: boolean;
+  reviewedPages?: number[];
   warnings: string[];
   range?: [number, number];
 };
+export type LayoutRegion = Rect & { columns: number[] };
 export type PageInfo = {
   page: number;
   width: number;
@@ -24,6 +26,7 @@ export type PageInfo = {
   spans: Span[];
   body: Rect;
   columns: number[];
+  regions?: LayoutRegion[];
 };
 export type Settings = {
   columns: 1 | 2;
