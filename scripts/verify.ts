@@ -244,7 +244,16 @@ assert.equal(
 );
 for (const p of placements) {
   assert.ok(p.y + p.contentHeight + p.answerHeight <= 841.89 - 34 + 0.1);
+  for (const f of p.fragments)
+    assert.ok(
+      p.x + f.rect.w * p.scale <= 595.276 - 34 + 0.1,
+      `Problem ${p.blockId} stays inside the A4 printable width`,
+    );
 }
+assert.ok(
+  Math.max(...placements.map((p) => p.scale)) >= 0.9,
+  'Source page width is mapped near the full printable A4 width',
+);
 const output = await exportBook(bytes, doc, blocks, settings);
 await fs.writeFile('test-output/verified-workbook.pdf', output);
 const result = await PDFDocument.load(output);

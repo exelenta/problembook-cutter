@@ -35,25 +35,30 @@ export function layoutBook(blocks: Block[], settings: Settings): Placement[] {
     margin = 34,
     gutter = 22,
     top = settings.title ? 48 : 34,
-    limit = H - 34;
+    limit = H - 34,
+    usableWidth = W - margin * 2;
   const width =
-    (W - margin * 2 - gutter * (settings.columns - 1)) / settings.columns;
+    (usableWidth - gutter * (settings.columns - 1)) / settings.columns;
   const maxW = Math.max(
     ...selected.flatMap((b) => b.fragments.map((f) => f.rect.w)),
   );
-  const naturalScale = Math.min(1, width / maxW);
+  // Preserve the source page's reading size: the widest source band maps to
+  // the full usable A4 width. A full-width prompt must not shrink every crop
+  // merely because the output itself uses two columns.
+  const naturalScale = Math.min(1, usableWidth / maxW);
   let page = 0,
     col = 0,
-    y = top;
+    columnY = Array<number>(settings.columns).fill(top);
   const placements: Placement[] = [];
   const used = new Set<string>();
-  const next = () => {
+  const nextPage = () => {
+    page++;
+    col = 0;
+    columnY = Array<number>(settings.columns).fill(top);
+  };
+  const nextColumn = () => {
     col++;
-    if (col >= settings.columns) {
-      page++;
-      col = 0;
-    }
-    y = top;
+    if (col >= settings.columns) nextPage();
   };
   for (const b of problems) {
     const idx = blocks.indexOf(b),
@@ -77,6 +82,7 @@ export function layoutBook(blocks: Block[], settings: Settings): Placement[] {
     const rawHeight =
       fragments.reduce((sum, f) => sum + f.rect.h, 0) +
       Math.max(0, fragments.length - 1) * 5;
+    const rawWidth = Math.max(...fragments.map((f) => f.rect.w));
     let scale = naturalScale,
       contentHeight = rawHeight * scale,
       answerHeight = (settings.answerMm * 72) / 25.4;
@@ -92,20 +98,41 @@ export function layoutBook(blocks: Block[], settings: Settings): Placement[] {
       throw new Error(
         `문제 ${b.label}가 너무 길어 읽기 어렵습니다. 1단 출력 또는 영역 분리를 선택하세요.`,
       );
-    if (y + contentHeight + answerHeight > limit + 0.01) next();
+    const spansPage =
+      settings.columns === 1 || rawWidth * scale > width + 0.01;
+    let y: number;
+    if (spansPage) {
+      y = Math.max(...columnY);
+      if (y + contentHeight + answerHeight > limit + 0.01 && y > top) {
+        nextPage();
+        y = top;
+      }
+    } else {
+      y = columnY[col];
+      if (y + contentHeight + answerHeight > limit + 0.01) {
+        nextColumn();
+        y = columnY[col];
+      }
+    }
     placements.push({
       blockId: b.id,
       fragments,
       page,
-      column: col,
-      x: margin + col * (width + gutter),
+      column: spansPage ? 0 : col,
+      x: spansPage ? margin : margin + col * (width + gutter),
       y,
-      width,
+      width: spansPage ? usableWidth : width,
       scale,
       contentHeight,
       answerHeight,
     });
-    y += contentHeight + answerHeight + 16;
+    const nextY = y + contentHeight + answerHeight + 16;
+    if (spansPage) {
+      columnY.fill(nextY);
+      col = 0;
+    } else {
+      columnY[col] = nextY;
+    }
   }
   return placements;
 }
