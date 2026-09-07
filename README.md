@@ -80,4 +80,3 @@ pnpm test:sample "경로/Differential_Equation_11e_24p.pdf"
 | `scripts/verify.ts`          | 합성·실제 예시 회귀 검사               |
 
 의존성은 각 프로젝트의 라이선스를 따릅니다. PDF.js의 글꼴·CMap·WASM은 실행/빌드 시 패키지에서 복사됩니다.
-
