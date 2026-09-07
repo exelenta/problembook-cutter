@@ -61,6 +61,28 @@ export function trim(ink: Ink, r: Rect, pad = 2): Rect {
     h: Math.min(bottom(r), y1 / s + pad) - y,
   };
 }
+function excludeSolidEdgeFill(ink: Ink, r: Rect): Rect {
+  // Scanned books and malformed PDF artwork sometimes leave a solid coloured
+  // strip at the page edge. It is not problem content, but a normal bounding
+  // box trim sees it as ink and stretches every crop to the strip.
+  const xs = projection(ink, r, 'x'),
+    s = ink.scale,
+    y0 = Math.max(0, Math.floor(r.y * s)),
+    y1 = Math.min(ink.height, Math.ceil(bottom(r) * s)),
+    dense = Math.max(1, (y1 - y0) * 0.68),
+    first = Math.max(0, Math.floor(r.x * s)),
+    last = Math.min(ink.width, Math.ceil(right(r) * s)) - 1,
+    minimum = Math.max(2, Math.ceil(2 * s));
+  let left = first,
+    rightEdge = last;
+  while (left <= last && xs[left] >= dense) left++;
+  while (rightEdge >= first && xs[rightEdge] >= dense) rightEdge--;
+  const leftRun = left - first,
+    rightRun = last - rightEdge;
+  const x = leftRun >= minimum ? (left + 1) / s : r.x,
+    end = rightRun >= minimum ? rightEdge / s : right(r);
+  return { x, y: r.y, w: Math.max(1, end - x), h: r.h };
+}
 function gaps(values: Uint32Array, from: number, to: number, scale: number) {
   const out: { a: number; b: number }[] = [];
   let start = -1;
@@ -220,14 +242,15 @@ export function inferLayout(
       wanted < section.y - 10 ? 10 : 36,
     );
   }
-  const body = trim(ink, { ...initial, y: top, h: Math.max(20, end - top) }, 4);
-  const nums = spans.filter(
-    (t) =>
-      /^\d{1,3}[.)](?:\s|$)/.test(t.text.trim()) &&
-      t.y >= body.y &&
-      bottom(t) <= bottom(body),
+  const body = excludeSolidEdgeFill(
+    ink,
+    trim(ink, { ...initial, y: top, h: Math.max(20, end - top) }, 4),
   );
-  const xs = nums.map((t) => t.x).sort((a, b) => a - b);
+  // Reuse the stricter event anchor test. A bare number inside an equation is
+  // not evidence for a second column; treating it as one shifts the divider
+  // into the left column and turns ordinary rows into false full-width bands.
+  const nums = events(spans, body).filter((event) => event.kind === 'problem');
+  const xs = nums.map((event) => event.span.x).sort((a, b) => a - b);
   const left = xs[0] ?? body.x;
   const second = xs.find(
     (x) => x - left > width * 0.3 && x - left < width * 0.56,
@@ -251,10 +274,25 @@ export function inferLayout(
   // center occupancy alone is intentionally not enough.
   const candidates = textRuns(spans, body)
     .filter(
-      (run) =>
-        run.x < divider - 14 &&
-        right(run) > divider + 14 &&
-        run.w > body.w * 0.32,
+      (run) => {
+        if (
+          run.x >= divider - 14 ||
+          right(run) <= divider + 14 ||
+          run.w <= body.w * 0.32
+        )
+          return false;
+        const ordered = [...run.spans].sort((a, b) => a.x - b.x),
+          crossing = ordered.some(
+            (span) => span.x <= divider && right(span) >= divider,
+          ),
+          leftSpan = ordered.filter((span) => right(span) <= divider).at(-1),
+          rightSpan = ordered.find((span) => span.x >= divider),
+          bridge =
+            leftSpan &&
+            rightSpan &&
+            rightSpan.x - right(leftSpan) <= Math.max(3.5, body.w * 0.007);
+        return crossing || bridge;
+      },
     )
     .map((run) => ({
       a: Math.max(body.y, run.y - 3),

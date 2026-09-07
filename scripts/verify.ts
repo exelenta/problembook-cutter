@@ -185,6 +185,41 @@ assert.ok(
     invertedT.regions.at(-1)?.columns.length === 0,
   'Mixed layout supports two columns changing to one column',
 );
+
+// Equation numbers must not masquerade as right-column problem anchors, and a
+// solid scanned-page strip must not enlarge every crop to the physical edge.
+const edgeInk: Ink = {
+    width: 1200,
+    height: 1600,
+    scale: 2,
+    data: new Uint8Array(1200 * 1600),
+  },
+  edgeSpans: Span[] = [
+    { text: '1.', x: 40, y: 100, w: 12, h: 10, baseline: 110, font: 'regular' },
+    { text: 'x =', x: 190, y: 100, w: 26, h: 10, baseline: 110, font: 'regular' },
+    { text: '2.', x: 220, y: 100, w: 12, h: 10, baseline: 110, font: 'regular' },
+    { text: '21.', x: 330, y: 100, w: 18, h: 10, baseline: 110, font: 'regular' },
+    { text: '3.', x: 40, y: 300, w: 12, h: 10, baseline: 310, font: 'regular' },
+    { text: '22.', x: 330, y: 300, w: 18, h: 10, baseline: 310, font: 'regular' },
+  ];
+for (const span of edgeSpans)
+  for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
+    edgeInk.data.fill(
+      1,
+      y * edgeInk.width + span.x * 2,
+      y * edgeInk.width + (span.x + span.w) * 2,
+    );
+for (let y = 0; y < edgeInk.height; y++)
+  edgeInk.data.fill(1, y * edgeInk.width + 1140, y * edgeInk.width + 1200);
+const cleanEdges = inferLayout(600, 800, edgeSpans, edgeInk);
+assert.ok(
+  cleanEdges.columns[0] > 280,
+  'An equation number cannot pull the column divider into the left column',
+);
+assert.ok(
+  cleanEdges.body.x + cleanEdges.body.w < 570,
+  'A solid page-edge strip is excluded from the content boundary',
+);
 if (filename) {
   const expected =
     doc.numPages === 4
