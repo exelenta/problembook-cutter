@@ -820,7 +820,7 @@ export default function Home() {
     estimated = layoutBook(blocks, settings).at(-1)!.page + 1;
   } catch {}
   return (
-    <main className="app">
+    <main className={`app ${doc ? 'has-document' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <Scissors />
@@ -1312,7 +1312,7 @@ export default function Home() {
                   <div
                     style={{
                       width: `${zoom}%`,
-                      minWidth: 350,
+                      minWidth: 0,
                       margin: '0 auto',
                       pointerEvents: busy ? 'none' : undefined,
                     }}
