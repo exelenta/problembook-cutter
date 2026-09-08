@@ -3,5 +3,10 @@
   "framework": null,
   "buildCommand": "pnpm build",
   "outputDirectory": "dist/client",
-  "installCommand": "pnpm install --frozen-lockfile"
+  "installCommand": "pnpm install --frozen-lockfile",
+  "functions": {
+    "api/locate-sections.ts": {
+      "maxDuration": 60
+    }
+  }
 }

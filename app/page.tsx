@@ -72,6 +72,12 @@ import {
 } from '@/lib/model';
 import { exportBook, layoutBook } from '@/lib/export';
 import { validateProject, type SavedProject } from '@/lib/project';
+import {
+  formatPageRanges,
+  parsePageRanges,
+  validateSectionRanges,
+  type SectionRange,
+} from '@/lib/section-ranges';
 
 const defaults: Settings = {
   columns: 2,
@@ -170,8 +176,7 @@ export default function Home() {
     [hash, setHash] = useState('');
   const bytes = useRef<Uint8Array | undefined>(undefined);
   const [page, setPage] = useState(1),
-    [start, setStart] = useState(1),
-    [end, setEnd] = useState(1),
+    [pageRanges, setPageRanges] = useState('1'),
     [rendered, setRendered] = useState<Rendered>();
   const cache = useRef(new Map<number, Rendered>()),
     pages = useRef(new Map<number, PageInfo>()),
@@ -186,8 +191,8 @@ export default function Home() {
     [progress, setProgress] = useState(0),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
-  const [query, setQuery] = useState('Exercises 1.1'),
-    [matches, setMatches] = useState<{ page: number; text: string }[]>([]);
+  const [query, setQuery] = useState('1.1 연습문제'),
+    [matches, setMatches] = useState<SectionRange[]>([]);
   const [mode, setMode] = useState<'select' | 'add' | 'append' | 'split'>(
       'select',
     ),
@@ -308,8 +313,7 @@ export default function Home() {
       setMatches([]);
       setPage(1);
       pageRef.current = 1;
-      setStart(1);
-      setEnd(1);
+      setPageRanges('1');
       invalidateOutput();
       setTab('edit');
       const r = await getPage(1, source);
@@ -346,33 +350,70 @@ export default function Home() {
   }
   async function search() {
     if (!doc || !query.trim()) return;
-    setBusy('연습문제 제목 찾기');
+    setBusy('AI가 연습문제 범위 찾는 중');
     setError('');
     setProgress(0);
     cancel.current = false;
-    const found: typeof matches = [];
     try {
-      const normalize = (s: string) =>
-        s
-          .normalize('NFKC')
-          .toLowerCase()
-          .replace(/\s+/g, '')
-          .replace(/[^\p{L}\p{N}.]/gu, '');
-      const target = normalize(query);
-      if (!target) throw new Error('검색할 제목을 입력하세요.');
+      const pageTexts: { page: number; text: string }[] = [];
       for (let n = 1; n <= doc.numPages && !cancel.current; n++) {
         const t = await readSpans(doc, n);
-        const all = t.spans.map((s) => s.text).join(' ');
-        if (normalize(all).includes(target))
-          found.push({ page: n, text: query });
-        setProgress((n / doc.numPages) * 100);
+        const all = t.spans.map((s) => s.text.trim()).filter(Boolean);
+        const joined = all.join(' ');
+        const excerpt =
+          joined.length <= 2500
+            ? joined
+            : `${joined.slice(0, 1000)}\n…\n${joined.slice(
+                Math.floor(joined.length / 2) - 350,
+                Math.floor(joined.length / 2) + 350,
+              )}\n…\n${joined.slice(-800)}`;
+        if (excerpt.trim()) pageTexts.push({ page: n, text: excerpt });
+        setProgress((n / doc.numPages) * 70);
         if (n % 5 === 0) await new Promise((r) => setTimeout(r, 0));
       }
+      if (cancel.current) return;
+      if (pageTexts.length === 0)
+        throw new Error(
+          '이 PDF에는 읽을 수 있는 텍스트가 없습니다. 이미지 PDF는 OCR 처리 후 다시 시도하세요.',
+        );
+      const host = window.location.hostname;
+      const endpoint =
+        host.endsWith('chatgpt.site') || host === 'localhost' || host === '127.0.0.1'
+          ? 'https://problembook-cutter.vercel.app/api/locate-sections'
+          : '/api/locate-sections';
+      setProgress(78);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request: query,
+          pageCount: doc.numPages,
+          pages: pageTexts,
+        }),
+      });
+      const data = (await response.json()) as {
+        ranges?: SectionRange[];
+        normalized_request?: string;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || 'AI 범위 검색에 실패했습니다.');
+      const found = validateSectionRanges(data.ranges ?? [], doc.numPages);
       setMatches(found);
+      setProgress(100);
+      if (found.length) {
+        const foundPages = found.flatMap((range) =>
+          Array.from(
+            { length: range.end - range.start + 1 },
+            (_, i) => range.start + i,
+          ),
+        );
+        setPageRanges(formatPageRanges(foundPages));
+        await goPage(found[0].start);
+      }
       setMessage(
         found.length
-          ? `${found.length}개 페이지에서 찾았습니다. 시작·끝 페이지를 원본에서 확인하세요.`
-          : '제목을 찾지 못했습니다. 이미지 PDF나 깨진 글자 정보는 페이지 범위로 선택하세요.',
+          ? `AI가 ${found.length}개 연습문제 구간을 찾았습니다. 구간을 확인한 뒤 경계 찾기를 누르세요.`
+          : 'AI가 요청한 연습문제 범위를 확정하지 못했습니다. 표현을 조금 바꾸거나 페이지 구간을 직접 입력하세요.',
       );
     } catch (e) {
       report(e);
@@ -382,15 +423,16 @@ export default function Home() {
   }
   async function analyze(all = true) {
     if (!doc) return;
-    const from = all ? start : page,
-      to = all ? end : page;
-    if (from > to || from < 1 || to > doc.numPages) {
-      setError('PDF 페이지 범위를 확인하세요.');
+    let targets: number[];
+    try {
+      targets = all ? parsePageRanges(pageRanges, doc.numPages) : [page];
+    } catch (e) {
+      report(e);
       return;
     }
-    if (to - from > 99) {
+    if (targets.length > 100) {
       setError(
-        '한 번에 100페이지까지 분석할 수 있습니다. 범위를 나누어 추가하세요.',
+        '한 번에 합계 100페이지까지 분석할 수 있습니다. 구간을 나누어 추가하세요.',
       );
       return;
     }
@@ -401,11 +443,12 @@ export default function Home() {
     const added: Block[] = [];
     const completed: number[] = [];
     try {
-      for (let n = from; n <= to && !cancel.current; n++) {
+      for (let index = 0; index < targets.length && !cancel.current; index++) {
+        const n = targets[index];
         const r = await getPage(n);
         added.push(...detectPage(r.info, r.ink));
         completed.push(n);
-        setProgress(((n - from + 1) / (to - from + 1)) * 100);
+        setProgress(((index + 1) / targets.length) * 100);
         await new Promise((r) => setTimeout(r, 0));
       }
       // Retain fragments from pages outside this explicit reanalysis range.
@@ -431,7 +474,7 @@ export default function Home() {
         added.find((b) => next.some((x) => x.id === b.id)) ?? next[0];
       setActive(first?.id);
       setFragment(first?.fragments[0]?.id);
-      await goPage(from);
+      await goPage(targets[0]);
       setMessage(
         `${completed.length}페이지 분석${cancel.current ? ' 중단' : ' 완료'}. 자동 경계는 초안입니다. 페이지별로 원본과 대조한 뒤 한 번에 검토 완료하세요.`,
       );
@@ -1001,7 +1044,7 @@ export default function Home() {
                 <div className="panel-section">
                   <div className="eyebrow">SOURCE RANGE</div>
                   <label className="field">
-                    <span>연습문제 제목</span>
+                    <span>AI에게 찾을 범위 설명</span>
                     <div className="search-row">
                       <input
                         value={query}
@@ -1009,10 +1052,10 @@ export default function Home() {
                         onKeyDown={(e) =>
                           e.key === 'Enter' && !busy && void search()
                         }
-                        placeholder="Exercises 1.1"
+                        placeholder="예: 4.1, 4.2, 4.3, 4.4 연습문제 전부"
                       />
                       <button
-                        aria-label="제목 검색"
+                        aria-label="AI로 범위 찾기"
                         disabled={!!busy}
                         onClick={() => void search()}
                       >
@@ -1022,48 +1065,45 @@ export default function Home() {
                   </label>
                   {matches.length > 0 && (
                     <div className="search-results">
-                      {matches.map((m) => (
+                      {matches.map((m, index) => (
                         <button
-                          key={m.page}
+                          key={`${m.start}-${m.end}-${index}`}
                           disabled={!!busy}
                           onClick={() => {
-                            setStart(m.page);
-                            setEnd(m.page);
-                            void goPage(m.page);
+                            void goPage(m.start);
                           }}
                         >
-                          PDF {m.page}페이지 <ChevronRight size={14} />
+                          <span>
+                            <strong>{m.label}</strong>
+                            {' · '}PDF {m.start}
+                            {m.end !== m.start ? `-${m.end}` : ''}페이지
+                          </span>
+                          <ChevronRight size={14} />
                         </button>
                       ))}
                     </div>
                   )}
-                  <div className="two-fields">
-                    <NumberField
-                      label="시작 페이지"
-                      value={start}
-                      onChange={setStart}
-                      min={1}
-                      max={doc.numPages}
+                  <label className="field">
+                    <span>분석할 PDF 페이지 구간</span>
+                    <input
+                      value={pageRanges}
+                      onChange={(e) => setPageRanges(e.target.value)}
+                      placeholder="23-26, 29-30"
+                      inputMode="text"
                     />
-                    <NumberField
-                      label="끝 페이지"
-                      value={end}
-                      onChange={setEnd}
-                      min={1}
-                      max={doc.numPages}
-                    />
-                  </div>
+                  </label>
                   <button
                     className="primary full"
                     disabled={!!busy}
                     onClick={() => void analyze()}
                   >
                     <ScanLine size={17} />
-                    선택 범위 경계 찾기
+                    선택 구간 경계 찾기
                   </button>
                   <p className="hint">
-                    같은 페이지를 다시 분석하면 그 페이지의 편집 영역이
-                    교체됩니다.
+                    자연어 요청은 OpenAI가 목차 없이도 페이지 내용을 읽어 여러
+                    구간으로 바꿉니다. 직접 입력할 때는 23-26, 29-30처럼
+                    적으세요.
                   </p>
                 </div>
                 <div className="panel-section block-heading">

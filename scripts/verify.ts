@@ -16,10 +16,75 @@ import {
 import { exportBook, layoutBook } from '../lib/export';
 import { demoPdf } from '../lib/demo';
 import { validateProject } from '../lib/project';
+import { formatPageRanges, parsePageRanges } from '../lib/section-ranges';
+import { POST as locateSections } from '../api/locate-sections';
 import type { Block, Ink, PageInfo, Span, Settings } from '../lib/model';
 
 const require = createRequire(import.meta.url),
   pdfRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
+
+assert.deepEqual(parsePageRanges('23-26, 29-30', 40), [
+  23, 24, 25, 26, 29, 30,
+]);
+assert.equal(formatPageRanges([30, 23, 24, 25, 26, 29, 29]), '23-26, 29-30');
+assert.throws(() => parsePageRanges('23-20', 40));
+assert.throws(() => parsePageRanges('41', 40));
+
+const originalFetch = globalThis.fetch;
+process.env.OPENAI_API_KEY = 'test-key';
+globalThis.fetch = async () =>
+  new Response(
+    JSON.stringify({
+      output: [
+        {
+          content: [
+            {
+              type: 'output_text',
+              text: JSON.stringify({
+                normalized_request: 'Exercises 4.1-4.4',
+                ranges: [
+                  {
+                    label: 'Exercises 4.1',
+                    start: 23,
+                    end: 26,
+                    confidence: 0.96,
+                    reason: '연속된 문제 번호',
+                  },
+                ],
+              }),
+            },
+          ],
+        },
+      ],
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+const aiResponse = await locateSections(
+  new Request('https://problembook-cutter.vercel.app/api/locate-sections', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'http://localhost:3000',
+    },
+    body: JSON.stringify({
+      request: '4.1, 4.2, 4.3, 4.4 연습문제 전부',
+      pageCount: 40,
+      pages: [{ page: 23, text: 'EXERCISES 4.1 1. Solve the equation.' }],
+    }),
+  }),
+);
+assert.equal(aiResponse.status, 200);
+assert.equal(aiResponse.headers.get('access-control-allow-origin'), 'http://localhost:3000');
+const aiResult = (await aiResponse.json()) as { ranges: unknown[] };
+assert.deepEqual(aiResult.ranges[0], {
+  label: 'Exercises 4.1',
+  start: 23,
+  end: 26,
+  confidence: 0.96,
+  reason: '연속된 문제 번호',
+});
+globalThis.fetch = originalFetch;
+delete process.env.OPENAI_API_KEY;
 const { createCanvas } = createRequire(path.join(pdfRoot, 'package.json'))(
   '@napi-rs/canvas',
 );
