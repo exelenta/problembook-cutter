@@ -78,6 +78,7 @@ import {
   validateSectionRanges,
   type SectionRange,
 } from '@/lib/section-ranges';
+import { selectCandidatePages } from '@/lib/ai-section-search';
 
 const defaults: Settings = {
   columns: 2,
@@ -382,13 +383,18 @@ export default function Home() {
           ? 'https://problembook-cutter.vercel.app/api/locate-sections'
           : '/api/locate-sections';
       setProgress(78);
+      const candidates = selectCandidatePages(query, pageTexts);
+      if (!candidates.length)
+        throw new Error(
+          '요청과 관련된 페이지 후보를 찾지 못했습니다. 절 번호나 제목을 조금 더 구체적으로 적어보세요.',
+        );
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           request: query,
           pageCount: doc.numPages,
-          pages: pageTexts,
+          pages: candidates,
         }),
       });
       const data = (await response.json()) as {
@@ -412,7 +418,7 @@ export default function Home() {
       }
       setMessage(
         found.length
-          ? `AI가 ${found.length}개 연습문제 구간을 찾았습니다. 구간을 확인한 뒤 경계 찾기를 누르세요.`
+          ? `전체 ${doc.numPages}페이지 중 로컬에서 고른 ${candidates.length}페이지만 AI가 확인해 ${found.length}개 구간을 찾았습니다.`
           : 'AI가 요청한 연습문제 범위를 확정하지 못했습니다. 표현을 조금 바꾸거나 페이지 구간을 직접 입력하세요.',
       );
     } catch (e) {

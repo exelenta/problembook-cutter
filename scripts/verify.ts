@@ -18,6 +18,10 @@ import { demoPdf } from '../lib/demo';
 import { validateProject } from '../lib/project';
 import { formatPageRanges, parsePageRanges } from '../lib/section-ranges';
 import { POST as locateSections } from '../api/locate-sections';
+import {
+  extractSectionIds,
+  selectCandidatePages,
+} from '../lib/ai-section-search';
 import type { Block, Ink, PageInfo, Span, Settings } from '../lib/model';
 
 const require = createRequire(import.meta.url),
@@ -29,6 +33,32 @@ assert.deepEqual(parsePageRanges('23-26, 29-30', 40), [
 assert.equal(formatPageRanges([30, 23, 24, 25, 26, 29, 29]), '23-26, 29-30');
 assert.throws(() => parsePageRanges('23-20', 40));
 assert.throws(() => parsePageRanges('41', 40));
+assert.deepEqual(extractSectionIds('4.1, 4.2, 4.3, 4.4 연습문제'), [
+  '4.1',
+  '4.2',
+  '4.3',
+  '4.4',
+]);
+const longBook = Array.from({ length: 462 }, (_, index) => ({
+  page: index + 1,
+  text: `Chapter text on PDF page ${index + 1}`,
+}));
+longBook[9].text = 'CONTENTS EXERCISES 4.1 EXERCISES 4.2 EXERCISES 4.3 EXERCISES 4.4';
+longBook[199].text = 'EXERCISES 4.1 1. Solve. 2. Solve. 3. Solve.';
+longBook[209].text = 'EXERCISES 4.2 1. Solve. 2. Solve. 3. Solve.';
+longBook[219].text = 'EXERCISES 4.3 1. Solve. 2. Solve. 3. Solve.';
+longBook[229].text = 'EXERCISES 4.4 1. Solve. 2. Solve. 3. Solve.';
+longBook[239].text = 'EXERCISES 4.5 1. Solve. 2. Solve. 3. Solve.';
+const candidatePages = selectCandidatePages(
+  '4.1, 4.2, 4.3, 4.4 연습문제 전부',
+  longBook,
+);
+assert.ok(candidatePages.length <= 40, 'Paid AI input is strictly bounded');
+for (const expected of [200, 210, 220, 230, 240])
+  assert.ok(
+    candidatePages.some((page) => page.page === expected),
+    `Candidate evidence includes PDF page ${expected}`,
+  );
 
 const originalFetch = globalThis.fetch;
 process.env.OPENAI_API_KEY = 'test-key';

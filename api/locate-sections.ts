@@ -75,12 +75,12 @@ export async function POST(requestObject: Request) {
   const pageCount = Number(body.pageCount);
   const pages = Array.isArray(body.pages)
     ? body.pages
-        .slice(0, 800)
+        .slice(0, 48)
         .map((page) => {
           const item = page as { page?: unknown; text?: unknown };
           return {
             page: Number(item.page),
-            text: typeof item.text === 'string' ? item.text.slice(0, 2600) : '',
+            text: typeof item.text === 'string' ? item.text.slice(0, 1400) : '',
           };
         })
         .filter(
@@ -101,8 +101,8 @@ export async function POST(requestObject: Request) {
       400,
     );
 
-  const instructions = `You locate exercise sections in textbook PDFs. The user may write Korean or English and may request several sections at once, such as "4.1, 4.2, 4.3, 4.4 연습문제 전부". Infer intended headings despite OCR errors, punctuation, spacing, translations, or headings such as EXERCISES 4.1, Review Exercises, Chapter Review, 연습문제, 문제, 탐구 문제. Return PDF page indexes, never printed page numbers. A range must include every page containing the requested exercise problems, including a page where the section begins or ends partway through. Do not include a table of contents occurrence. Use problem-number sequences and neighboring page continuity as evidence. Return one range per requested section; merge only if the PDF makes adjacent sections genuinely inseparable. If uncertain, prefer a slightly wider range and explain briefly in Korean.`;
-  const input = `사용자 요청: ${userRequest}\nPDF 전체 페이지 수: ${pageCount}\n다음은 PDF 페이지별 발췌 텍스트입니다.\n${pages
+  const instructions = `You locate exercise sections in textbook PDFs. The user may write Korean or English and may request several sections at once, such as "4.1, 4.2, 4.3, 4.4 연습문제 전부". The browser has already selected a small set of likely pages locally to control cost; missing page numbers between supplied candidates still exist in the PDF and may belong inside a continuous output range. Infer intended headings despite OCR errors, punctuation, spacing, translations, or headings such as EXERCISES 4.1, Review Exercises, Chapter Review, 연습문제, 문제, 탐구 문제. Return PDF page indexes, never printed page numbers. A range must include every page containing the requested exercise problems, including intermediate pages not supplied when the start and next-section evidence establish them. Do not include a table of contents occurrence. Use problem-number sequences and neighboring page continuity as evidence. Return one range per requested section; merge only if the PDF makes adjacent sections genuinely inseparable. If uncertain, prefer a slightly wider range and explain briefly in Korean.`;
+  const input = `사용자 요청: ${userRequest}\nPDF 전체 페이지 수: ${pageCount}\n로컬 검색으로 추린 후보 ${pages.length}페이지의 발췌 텍스트입니다.\n${pages
     .map((page) => `\n--- PDF PAGE ${page.page} ---\n${page.text}`)
     .join('')}`;
 
@@ -154,7 +154,12 @@ export async function POST(requestObject: Request) {
     const data = (await openaiResponse.json()) as Record<string, unknown>;
     if (!openaiResponse.ok) {
       const detail = data.error as { message?: string } | undefined;
-      throw new Error(detail?.message || `OpenAI API 오류 (${openaiResponse.status})`);
+      const apiMessage = detail?.message || `OpenAI API 오류 (${openaiResponse.status})`;
+      throw new Error(
+        /context window|maximum context|too many tokens/i.test(apiMessage)
+          ? 'AI 입력 한도를 넘었습니다. 더 적은 절로 나누어 검색해 주세요.'
+          : apiMessage,
+      );
     }
     return json(requestObject, JSON.parse(outputText(data)));
   } catch (error) {
