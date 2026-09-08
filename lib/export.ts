@@ -27,7 +27,10 @@ export function layoutBook(blocks: Block[], settings: Settings): Placement[] {
     settings.answerMm > 150
   )
     throw new Error('풀이 여백은 0~150 mm로 설정하세요.');
-  const selected = blocks.filter((b) => b.selected);
+  const selected = blocks.filter(
+    (b) =>
+      b.selected && !(settings.excludeHeaders && b.label === '연습문제 머리말'),
+  );
   const problems = selected.filter((b) => b.kind !== 'instruction');
   if (!problems.length) throw new Error('출력할 문제를 선택하세요.');
   const W = 595.276,
@@ -98,8 +101,7 @@ export function layoutBook(blocks: Block[], settings: Settings): Placement[] {
       throw new Error(
         `문제 ${b.label}가 너무 길어 읽기 어렵습니다. 1단 출력 또는 영역 분리를 선택하세요.`,
       );
-    const spansPage =
-      settings.columns === 1 || rawWidth * scale > width + 0.01;
+    const spansPage = settings.columns === 1 || rawWidth * scale > width + 0.01;
     let y: number;
     if (spansPage) {
       y = Math.max(...columnY);

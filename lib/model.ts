@@ -33,6 +33,7 @@ export type Settings = {
   answerMm: number;
   ruled: boolean;
   repeatInstructions: boolean;
+  excludeHeaders: boolean;
   title: string;
 };
 export const uid = () => globalThis.crypto.randomUUID();

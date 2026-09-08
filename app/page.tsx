@@ -78,6 +78,7 @@ const defaults: Settings = {
   answerMm: 45,
   ruled: true,
   repeatInstructions: false,
+  excludeHeaders: true,
   title: '',
 };
 function Choice({
@@ -567,17 +568,6 @@ export default function Home() {
     }
     setError('');
     try {
-      const warnings: string[] = [];
-      const r = await getPage(page);
-      for (const b of currentPageBlocks)
-        for (const f of b.fragments.filter((f) => f.page === page))
-          warnings.push(...edgeWarnings(r.ink, f.rect));
-      if (warnings.length) {
-        setError(
-          '이 페이지에 잉크를 가르는 경계가 있습니다. 표시된 영역을 넓히거나 여백으로 옮겨 주세요.',
-        );
-        return;
-      }
       const nextBlocks = blocks.map((b) => {
         if (!b.selected || !b.fragments.some((f) => f.page === page)) return b;
         const reviewedPages = [
@@ -724,12 +714,6 @@ export default function Home() {
         throw new Error(
           `선택한 ${pendingPages.length}페이지가 아직 검토되지 않았습니다.`,
         );
-      for (const b of selected)
-        for (const f of b.fragments) {
-          const r = await getPage(f.page);
-          if (edgeWarnings(r.ink, f.rect).length)
-            throw new Error(`${b.label}: 원본을 가르는 경계가 있습니다.`);
-        }
       const result = await exportBook(
         bytes.current,
         doc,
@@ -1260,44 +1244,46 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="drawing-tools">
-                  <button
-                    className={mode === 'select' ? 'tool-active' : ''}
-                    disabled={!!busy}
-                    onClick={() => setMode('select')}
-                  >
-                    <MousePointer2 size={15} />
-                    선택
-                  </button>
-                  <button
-                    className={mode === 'add' ? 'tool-active' : ''}
-                    disabled={!!busy}
-                    onClick={() => setMode('add')}
-                  >
-                    <Plus size={15} />
-                    영역 추가
-                  </button>
-                  <button
-                    className={mode === 'append' ? 'tool-active' : ''}
-                    disabled={!!busy || !current}
-                    onClick={() => setMode('append')}
-                  >
-                    <Link2 size={15} />이 문제에 조각 추가
-                  </button>
-                  <button
-                    className={mode === 'split' ? 'tool-active' : ''}
-                    disabled={!!busy || !current}
-                    onClick={() => setMode('split')}
-                  >
-                    <Scissors size={15} />
-                    가로 분할
-                  </button>
-                </div>
-                <div className="audit-toolbar">
-                  <button disabled={!!busy || !rendered} onClick={auditPage}>
-                    <ScanLine size={14} />
-                    현재 페이지 누락 영역 찾기
-                  </button>
+                <div className="canvas-actions">
+                  <div className="drawing-tools">
+                    <button
+                      className={mode === 'select' ? 'tool-active' : ''}
+                      disabled={!!busy}
+                      onClick={() => setMode('select')}
+                    >
+                      <MousePointer2 size={15} />
+                      선택
+                    </button>
+                    <button
+                      className={mode === 'add' ? 'tool-active' : ''}
+                      disabled={!!busy}
+                      onClick={() => setMode('add')}
+                    >
+                      <Plus size={15} />
+                      영역 추가
+                    </button>
+                    <button
+                      className={mode === 'append' ? 'tool-active' : ''}
+                      disabled={!!busy || !current}
+                      onClick={() => setMode('append')}
+                    >
+                      <Link2 size={15} />이 문제에 조각 추가
+                    </button>
+                    <button
+                      className={mode === 'split' ? 'tool-active' : ''}
+                      disabled={!!busy || !current}
+                      onClick={() => setMode('split')}
+                    >
+                      <Scissors size={15} />
+                      가로 분할
+                    </button>
+                  </div>
+                  <div className="audit-toolbar">
+                    <button disabled={!!busy || !rendered} onClick={auditPage}>
+                      <ScanLine size={14} />
+                      현재 페이지 누락 영역 찾기
+                    </button>
+                  </div>
                 </div>
                 <div className="canvas-help">
                   {mode === 'select'
@@ -1761,7 +1747,7 @@ export default function Home() {
               </aside>
             </div>
           </TabsContent>
-          <TabsContent value="export">
+          <TabsContent value="export" className="export-content">
             <div className="export-layout">
               <section className="export-options">
                 <div className="eyebrow">WORKBOOK SETTINGS</div>
@@ -1821,6 +1807,16 @@ export default function Home() {
                     checked={settings.repeatInstructions}
                     onCheckedChange={(v) =>
                       updateSettings((s) => ({ ...s, repeatInstructions: v }))
+                    }
+                  />
+                </div>
+                <div className="switch-row">
+                  <span>연습문제 머리말 제외</span>
+                  <Switch
+                    aria-label="연습문제 머리말 제외"
+                    checked={settings.excludeHeaders}
+                    onCheckedChange={(v) =>
+                      updateSettings((s) => ({ ...s, excludeHeaders: v }))
                     }
                   />
                 </div>
@@ -1891,7 +1887,10 @@ export default function Home() {
               </section>
               <section className="export-preview">
                 {output ? (
-                  <iframe title="출력 문제집 PDF 미리보기" src={output} />
+                  <iframe
+                    title="출력 문제집 PDF 미리보기"
+                    src={`${output}#view=Fit&toolbar=1&navpanes=0`}
+                  />
                 ) : (
                   <div className="output-empty">
                     <FileText size={45} />

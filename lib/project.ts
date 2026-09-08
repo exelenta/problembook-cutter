@@ -108,8 +108,15 @@ export function validateProject(
     s.answerMm > 150 ||
     typeof s.ruled !== 'boolean' ||
     typeof s.repeatInstructions !== 'boolean' ||
+    (s.excludeHeaders !== undefined && typeof s.excludeHeaders !== 'boolean') ||
     typeof s.title !== 'string'
   )
     throw new Error('출력 설정이 올바르지 않습니다.');
-  return p;
+  return {
+    ...p,
+    settings: {
+      ...p.settings,
+      excludeHeaders: p.settings.excludeHeaders ?? true,
+    },
+  };
 }

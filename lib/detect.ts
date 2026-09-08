@@ -273,27 +273,25 @@ export function inferLayout(
   // Ordinary two-column equations may touch the gutter by a glyph or two, so
   // center occupancy alone is intentionally not enough.
   const candidates = textRuns(spans, body)
-    .filter(
-      (run) => {
-        if (
-          run.x >= divider - 14 ||
-          right(run) <= divider + 14 ||
-          run.w <= body.w * 0.32
-        )
-          return false;
-        const ordered = [...run.spans].sort((a, b) => a.x - b.x),
-          crossing = ordered.some(
-            (span) => span.x <= divider && right(span) >= divider,
-          ),
-          leftSpan = ordered.filter((span) => right(span) <= divider).at(-1),
-          rightSpan = ordered.find((span) => span.x >= divider),
-          bridge =
-            leftSpan &&
-            rightSpan &&
-            rightSpan.x - right(leftSpan) <= Math.max(3.5, body.w * 0.007);
-        return crossing || bridge;
-      },
-    )
+    .filter((run) => {
+      if (
+        run.x >= divider - 14 ||
+        right(run) <= divider + 14 ||
+        run.w <= body.w * 0.32
+      )
+        return false;
+      const ordered = [...run.spans].sort((a, b) => a.x - b.x),
+        crossing = ordered.some(
+          (span) => span.x <= divider && right(span) >= divider,
+        ),
+        leftSpan = ordered.filter((span) => right(span) <= divider).at(-1),
+        rightSpan = ordered.find((span) => span.x >= divider),
+        bridge =
+          leftSpan &&
+          rightSpan &&
+          rightSpan.x - right(leftSpan) <= Math.max(3.5, body.w * 0.007);
+      return crossing || bridge;
+    })
     .map((run) => ({
       a: Math.max(body.y, run.y - 3),
       b: Math.min(bottom(body), bottom(run) + 3),
@@ -465,7 +463,7 @@ function events(spans: Span[], r: Rect): Event[] {
     )
       es.push({ span: t, kind: 'problem', label: m[1] });
     else if (
-      /^In\s+(?:Problems?|Exercises?)\s+\d/i.test(text) &&
+      /^(?:In\s+|Answer\s+)(?:Problems?|Exercises?)\s+\d/i.test(text) &&
       !inside.some(
         (s) =>
           s.x < t.x &&

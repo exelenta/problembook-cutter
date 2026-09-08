@@ -95,6 +95,10 @@ p {
   gap: 20px;
   flex: none;
 }
+.app.has-document .topbar {
+  height: 60px;
+  padding-inline: 24px;
+}
 .brand {
   display: flex;
   gap: 12px;
@@ -309,6 +313,9 @@ p {
   font-size: 14px;
   color: #224776;
 }
+.app.has-document .notice {
+  padding-block: 9px;
+}
 .notice > span {
   flex: 1;
 }
@@ -374,7 +381,7 @@ p {
   align-items: center;
   justify-content: space-between;
   background: white;
-  padding: 14px 24px;
+  padding: 9px 24px;
   border-bottom: 1px solid var(--line);
   gap: 15px;
   flex: none;
@@ -648,7 +655,7 @@ p {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 12px 18px;
+  padding: 8px 14px;
   background: #f9fbfd;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
@@ -677,10 +684,17 @@ p {
   padding: 5px;
   font-size: 13px;
 }
+.canvas-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px 3px;
+}
 .drawing-tools {
   display: flex;
   gap: 5px;
-  padding: 10px 12px 3px;
+  padding: 0;
   flex-wrap: wrap;
 }
 .drawing-tools button {
@@ -697,7 +711,7 @@ p {
 .canvas-help {
   font-size: 12px;
   color: #667990;
-  padding: 6px 16px 12px;
+  padding: 4px 14px 8px;
 }
 .canvas-scroll {
   flex: 1;
@@ -820,7 +834,7 @@ p {
   display: flex;
   justify-content: center;
   gap: 18px;
-  padding: 12px;
+  padding: 7px 12px;
   font-size: 12px;
   color: #65798f;
   flex-wrap: wrap;
@@ -953,12 +967,19 @@ p {
 .export-layout {
   display: grid;
   grid-template-columns: 330px minmax(0, 1fr);
-  min-height: calc(100vh - 144px);
+  height: 100%;
+  min-height: 0;
+}
+.editor-root > .export-content {
+  min-height: 0;
+  overflow: hidden;
 }
 .export-options {
   padding: 32px 26px;
   background: white;
   border-right: 1px solid var(--line);
+  min-height: 0;
+  overflow-y: auto;
 }
 .export-options h2 {
   font-size: 24px;
@@ -990,18 +1011,24 @@ p {
 .export-preview {
   padding: 30px;
   background: #e9eef4;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
 }
 .export-preview iframe {
   border: 0;
   width: 100%;
-  height: calc(100vh - 200px);
-  min-height: 650px;
+  height: 100%;
+  min-height: 0;
   border-radius: 8px;
   background: white;
 }
 .output-empty {
+  width: 100%;
+  flex: 1;
   height: 100%;
-  min-height: 600px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1061,8 +1088,21 @@ p {
   .editor-root > [data-slot='tabs-content'] {
     overflow: visible;
   }
+  .editor-root > .export-content {
+    overflow: visible;
+  }
   .editor-grid {
     grid-template-columns: 250px minmax(0, 1fr);
+  }
+  .export-layout {
+    height: auto;
+    min-height: calc(100dvh - 180px);
+  }
+  .export-options {
+    overflow: visible;
+  }
+  .export-preview {
+    min-height: 70dvh;
   }
   .inspector {
     grid-column: 1/-1;
@@ -1088,6 +1128,7 @@ p {
   }
 }
 @media (max-width: 760px) {
+  .app.has-document .topbar,
   .topbar {
     height: auto;
     min-height: 70px;
@@ -1158,7 +1199,7 @@ p {
     padding: 15px;
   }
   .export-preview iframe {
-    min-height: 550px;
+    min-height: 70dvh;
   }
   .filename strong {
     max-width: 65vw;
@@ -1168,6 +1209,10 @@ p {
     position: sticky;
     top: 0;
     z-index: 5;
+  }
+  .canvas-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
   .notice {
     padding: 10px 16px;

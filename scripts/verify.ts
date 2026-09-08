@@ -196,11 +196,43 @@ const edgeInk: Ink = {
   },
   edgeSpans: Span[] = [
     { text: '1.', x: 40, y: 100, w: 12, h: 10, baseline: 110, font: 'regular' },
-    { text: 'x =', x: 190, y: 100, w: 26, h: 10, baseline: 110, font: 'regular' },
-    { text: '2.', x: 220, y: 100, w: 12, h: 10, baseline: 110, font: 'regular' },
-    { text: '21.', x: 330, y: 100, w: 18, h: 10, baseline: 110, font: 'regular' },
+    {
+      text: 'x =',
+      x: 190,
+      y: 100,
+      w: 26,
+      h: 10,
+      baseline: 110,
+      font: 'regular',
+    },
+    {
+      text: '2.',
+      x: 220,
+      y: 100,
+      w: 12,
+      h: 10,
+      baseline: 110,
+      font: 'regular',
+    },
+    {
+      text: '21.',
+      x: 330,
+      y: 100,
+      w: 18,
+      h: 10,
+      baseline: 110,
+      font: 'regular',
+    },
     { text: '3.', x: 40, y: 300, w: 12, h: 10, baseline: 310, font: 'regular' },
-    { text: '22.', x: 330, y: 300, w: 18, h: 10, baseline: 310, font: 'regular' },
+    {
+      text: '22.',
+      x: 330,
+      y: 300,
+      w: 18,
+      h: 10,
+      baseline: 310,
+      font: 'regular',
+    },
   ];
 for (const span of edgeSpans)
   for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
@@ -219,6 +251,70 @@ assert.ok(
 assert.ok(
   cleanEdges.body.x + cleanEdges.body.w < 570,
   'A solid page-edge strip is excluded from the content boundary',
+);
+
+const reviewInk: Ink = {
+    width: 1200,
+    height: 800,
+    scale: 2,
+    data: new Uint8Array(1200 * 800),
+  },
+  reviewSpans: Span[] = [
+    {
+      text: 'Answers to selected odd-numbered problems',
+      x: 40,
+      y: 60,
+      w: 500,
+      h: 12,
+      baseline: 70,
+      font: 'regular',
+    },
+    {
+      text: 'Answer Problems 1–10 without referring back to the text.',
+      x: 40,
+      y: 100,
+      w: 230,
+      h: 10,
+      baseline: 110,
+      font: 'regular',
+    },
+    { text: '1.', x: 40, y: 130, w: 12, h: 10, baseline: 140, font: 'regular' },
+    {
+      text: '13.',
+      x: 330,
+      y: 100,
+      w: 18,
+      h: 10,
+      baseline: 110,
+      font: 'regular',
+    },
+  ];
+for (const span of reviewSpans)
+  for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
+    reviewInk.data.fill(
+      1,
+      y * reviewInk.width + span.x * 2,
+      y * reviewInk.width + (span.x + span.w) * 2,
+    );
+const reviewBlocks = detectPage(
+  {
+    page: 1,
+    width: 600,
+    height: 400,
+    spans: reviewSpans,
+    body: { x: 32, y: 55, w: 512, h: 200 },
+    columns: [287],
+    regions: [
+      { x: 32, y: 55, w: 512, h: 35, columns: [] },
+      { x: 32, y: 90, w: 512, h: 165, columns: [287] },
+    ],
+  },
+  reviewInk,
+);
+assert.equal(
+  reviewBlocks.find((b) => b.range?.[0] === 1)?.label,
+  '1–10 공통 지시문',
+  'Answer Problems ranges are common instructions, not exercise headers',
 );
 if (filename) {
   const expected =
@@ -270,6 +366,7 @@ const settings: Settings = {
   answerMm: 45,
   ruled: true,
   repeatInstructions: false,
+  excludeHeaders: true,
   title: '',
 };
 const placements = layoutBook(blocks, settings);
@@ -288,6 +385,33 @@ for (const p of placements) {
 assert.ok(
   Math.max(...placements.map((p) => p.scale)) >= 0.9,
   'Source page width is mapped near the full printable A4 width',
+);
+const headerBlock: Block = {
+    id: 'header',
+    label: '연습문제 머리말',
+    kind: 'instruction',
+    selected: true,
+    reviewed: true,
+    warnings: [],
+    fragments: [
+      { id: 'header-fragment', page: 1, rect: { x: 0, y: 0, w: 500, h: 30 } },
+    ],
+  },
+  problemBlock: Block = {
+    id: 'problem',
+    label: '1',
+    kind: 'problem',
+    selected: true,
+    reviewed: true,
+    warnings: [],
+    fragments: [
+      { id: 'problem-fragment', page: 1, rect: { x: 0, y: 40, w: 250, h: 30 } },
+    ],
+  };
+assert.deepEqual(
+  layoutBook([headerBlock, problemBlock], settings)[0].fragments,
+  problemBlock.fragments,
+  'Exercise headers are excluded from output by default',
 );
 const output = await exportBook(bytes, doc, blocks, settings);
 await fs.writeFile('test-output/verified-workbook.pdf', output);
