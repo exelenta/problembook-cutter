@@ -37,7 +37,7 @@ export async function readSpans(
     const tx = pdf.Util.transform(vp.transform, item.transform),
       style = content.styles[item.fontName];
     const h = Math.hypot(tx[2], tx[3]),
-      ascent = style.ascent ?? 0.85;
+      ascent = Number.isFinite(style.ascent) ? style.ascent : 0.85;
     return [
       {
         text: item.str,

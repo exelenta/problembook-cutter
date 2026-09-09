@@ -9,8 +9,9 @@
     "dev": "node scripts/copy-pdf-assets.mjs && vinext dev",
     "build": "node scripts/copy-pdf-assets.mjs && node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "esbuild scripts/verify.ts --bundle --platform=node --format=esm --packages=external --outfile=test-output/verify.mjs && node test-output/verify.mjs",
-    "test:sample": "esbuild scripts/verify.ts --bundle --platform=node --format=esm --packages=external --outfile=test-output/verify.mjs && node test-output/verify.mjs",
+    "test": "node scripts/run-verify.mjs",
+    "test:sample": "node scripts/run-verify.mjs",
+    "inspect:pages": "esbuild scripts/inspect-pages.ts --bundle --platform=node --format=esm --packages=external --outfile=tmp/pdfs/inspect-pages.mjs && node tmp/pdfs/inspect-pages.mjs",
     "start": "vinext start",
     "lint": "oxlint",
     "format": "oxfmt"

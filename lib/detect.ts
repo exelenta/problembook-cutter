@@ -83,7 +83,13 @@ function excludeSolidEdgeFill(ink: Ink, r: Rect): Rect {
     end = rightRun >= minimum ? rightEdge / s : right(r);
   return { x, y: r.y, w: Math.max(1, end - x), h: r.h };
 }
-function gaps(values: Uint32Array, from: number, to: number, scale: number) {
+function gaps(
+  values: Uint32Array,
+  from: number,
+  to: number,
+  scale: number,
+  maxValue = 0,
+) {
   const out: { a: number; b: number }[] = [];
   let start = -1;
   for (
@@ -91,7 +97,7 @@ function gaps(values: Uint32Array, from: number, to: number, scale: number) {
     i <= Math.min(values.length - 1, Math.floor(to * scale));
     i++
   ) {
-    if (values[i] === 0) {
+    if (values[i] <= maxValue) {
       if (start < 0) start = i;
     } else if (start >= 0) {
       out.push({ a: start / scale, b: i / scale });
@@ -161,9 +167,19 @@ export function inferLayout(
     h: height * 0.89,
   };
   const initialRuns = textRuns(spans, initial);
-  const exercise = initialRuns.find((run) =>
-    /^EXERCISES?\b/.test(run.text.trim()),
-  );
+  const exercise =
+    initialRuns.find((run) =>
+      /^Answers to selected (?:odd-numbered )?problems\b/i.test(run.text.trim()),
+    ) ??
+    initialRuns.find(
+      (run) =>
+        /^EXERCISES?\b/i.test(run.text.trim()) &&
+        !spans.some(
+          (span) =>
+            span.baseline < run.baseline &&
+            /^\d{1,3}[.)](?:\s|$)/.test(span.text.trim()),
+        ),
+    );
   const initialNumbers = spans
     .filter(
       (span) =>
@@ -189,14 +205,24 @@ export function inferLayout(
     whitespace.sort((a, b) => b.b - b.a - (a.b - a.a));
     if (whitespace[0]) top = (whitespace[0].a + whitespace[0].b) / 2;
   }
-  const section =
-    initialRuns.find(
+  const section = [
+    ...initialRuns.filter(
       (run) =>
         run.y > top + 70 &&
-        /^\s*\d+\.\d+\s+[A-Z][\p{L}-]+/u.test(run.text) &&
-        run.h >= 14,
-    ) ??
-    spans.find(
+        /^EXERCISES?\s+\d/i.test(run.text.trim()) &&
+        spans.some(
+          (span) =>
+            span.baseline < run.baseline &&
+            /^\d{1,3}[.)](?:\s|$)/.test(span.text.trim()),
+        ),
+    ),
+    ...textLines(spans, initial).filter(
+      (run) =>
+        run.y > top + 70 &&
+        /^\s*\d+\.\d+\s+[A-Z]/u.test(run.text) &&
+        run.h >= 10,
+    ),
+    ...spans.filter(
       (span) =>
         span.y > top + 70 &&
         /^\d+\.\d+$/.test(span.text.trim()) &&
@@ -204,11 +230,13 @@ export function inferLayout(
         spans.some(
           (title) =>
             title.x > right(span) &&
+            title.x - right(span) < 40 &&
             Math.abs(title.baseline - span.baseline) < 3 &&
             title.h >= 12 &&
-            /^[A-Z][\p{L}-]+/u.test(title.text.trim()),
+            /^[A-Z]/u.test(title.text.trim()),
         ),
-    );
+    ),
+  ].sort((a, b) => a.y - b.y)[0];
   if (section) {
     let wanted = Math.max(top + 20, section.y - 6);
     const scanTop = Math.max(top, section.y - 70) * ink.scale,
@@ -256,12 +284,17 @@ export function inferLayout(
     (x) => x - left > width * 0.3 && x - left < width * 0.56,
   );
   const p = projection(ink, body, 'x');
-  const center = second !== undefined ? second - 7 : body.x + body.w / 2;
+  // Trimming can shorten one physical page edge when the selected exercise
+  // ends near the top. The true gutter still follows the original page body,
+  // so use that center when no second-column number anchor is available.
+  const center =
+    second !== undefined ? second - 7 : initial.x + initial.w / 2;
   const gs = gaps(
     p,
     Math.max(body.x + body.w * 0.3, center - width * 0.045),
     Math.min(right(body) - body.w * 0.2, center + width * 0.045),
     ink.scale,
+    Math.max(2, Math.ceil(body.h * ink.scale * 0.012)),
   ).filter((g) => g.b - g.a >= 4);
   gs.sort((a, b) => b.b - b.a - (a.b - a.a));
   const divider =
@@ -277,7 +310,9 @@ export function inferLayout(
       if (
         run.x >= divider - 14 ||
         right(run) <= divider + 14 ||
-        run.w <= body.w * 0.32
+        run.w <= body.w * 0.55 ||
+        divider - run.x <= body.w * 0.18 ||
+        right(run) - divider <= body.w * 0.18
       )
         return false;
       const ordered = [...run.spans].sort((a, b) => a.x - b.x),
@@ -296,38 +331,17 @@ export function inferLayout(
       a: Math.max(body.y, run.y - 3),
       b: Math.min(bottom(body), bottom(run) + 3),
     }));
-  const longRuleThreshold = body.w * ink.scale * 0.35,
-    bodyX0 = Math.max(0, Math.floor(body.x * ink.scale)),
-    bodyX1 = Math.min(ink.width, Math.ceil(right(body) * ink.scale));
-  let ruleStart = -1;
-  for (
-    let y = Math.max(0, Math.floor(body.y * ink.scale));
-    y < Math.min(ink.height, Math.ceil(bottom(body) * ink.scale));
-    y++
-  ) {
-    let run = 0,
-      longest = 0;
-    for (let x = bodyX0; x < bodyX1; x++) {
-      if (ink.data[y * ink.width + x]) {
-        run++;
-        longest = Math.max(longest, run);
-      } else run = 0;
-    }
-    const isRule = longest >= longRuleThreshold;
-    if (isRule && ruleStart < 0) ruleStart = y;
-    if (!isRule && ruleStart >= 0) {
-      candidates.push({
-        a: Math.max(body.y, ruleStart / ink.scale - 3),
-        b: Math.min(bottom(body), y / ink.scale + 3),
-      });
-      ruleStart = -1;
-    }
-  }
-  if (ruleStart >= 0)
+  const exerciseHeader = textRuns(spans, body).find((run) =>
+    /^Answers to selected (?:odd-numbered )?problems\b/i.test(run.text.trim()),
+  );
+  if (exerciseHeader)
     candidates.push({
-      a: Math.max(body.y, ruleStart / ink.scale - 3),
-      b: bottom(body),
+      a: body.y,
+      b: Math.min(bottom(body), bottom(exerciseHeader) + 8),
     });
+  // Decorative horizontal rules may cross the gutter, but they do not change
+  // the reading layout. Only actual text spanning both columns creates a
+  // full-width band.
   candidates.sort((a, b) => a.a - b.a);
   const fullWidthBands: { a: number; b: number }[] = [];
   for (const candidate of candidates) {
@@ -435,6 +449,61 @@ function textRuns(spans: Span[], r: Rect): TextRun[] {
   }
   return runs;
 }
+function textLines(spans: Span[], r: Rect): TextRun[] {
+  const inside = spans
+    .filter(
+      (t) =>
+        t.x >= r.x &&
+        t.x < right(r) &&
+        t.baseline >= r.y &&
+        t.baseline < bottom(r),
+    )
+    .sort((a, b) => a.baseline - b.baseline || a.x - b.x);
+  const rows: Span[][] = [];
+  for (const span of inside) {
+    const row = rows.findLast(
+      (candidate) => Math.abs(candidate[0].baseline - span.baseline) < 3,
+    );
+    if (row) row.push(span);
+    else rows.push([span]);
+  }
+  return rows.map((row) => {
+    row = row
+      .sort((a, b) => a.x - b.x)
+      .filter(
+        (span, index, sorted) =>
+          !sorted
+            .slice(0, index)
+            .some(
+              (prior) =>
+                prior.text === span.text &&
+                Math.abs(prior.x - span.x) < 0.5 &&
+                Math.abs(prior.baseline - span.baseline) < 0.5,
+            ),
+      );
+    const x = Math.min(...row.map((s) => s.x)),
+      y = Math.min(...row.map((s) => s.y)),
+      end = Math.max(...row.map(right)),
+      low = Math.max(...row.map(bottom));
+    let lineText = '',
+      prior: Span | undefined;
+    for (const span of row) {
+      if (lineText && prior && span.x - right(prior) > 1.5) lineText += ' ';
+      lineText += span.text.trim();
+      prior = span;
+    }
+    return {
+      x,
+      y,
+      w: end - x,
+      h: low - y,
+      baseline: row[0].baseline,
+      text: lineText,
+      font: row.map((s) => s.font).join(' '),
+      spans: row,
+    };
+  });
+}
 function events(spans: Span[], r: Rect): Event[] {
   const inside = spans.filter(
     (t) =>
@@ -509,6 +578,24 @@ function events(spans: Span[], r: Rect): Event[] {
         label: run.text,
       });
   }
+  for (const line of textLines(inside, r)) {
+    const heading = line.text.match(
+      /^(EXERCISES?\b.*|Discussion\s+Problems\b.*|Computer\s+Lab\s+Assignments\b.*)$/i,
+    )?.[1];
+    if (
+      heading &&
+      !es.some(
+        (e) =>
+          e.kind === 'instruction' &&
+          Math.abs(e.span.baseline - line.baseline) < 3,
+      )
+    )
+      es.push({
+        span: { ...line, text: heading },
+        kind: 'instruction',
+        label: heading,
+      });
+  }
   return es
     .filter(
       (e, i) =>
@@ -567,7 +654,7 @@ export function detectPage(info: PageInfo, ink: Ink): Block[] {
       };
       if (!es.length) {
         make(col, undefined, [
-          '문제 번호를 찾지 못했습니다. 영역을 직접 분할하세요',
+          '단 또는 페이지 앞부분입니다. 이전 문제와 이어지는지 확인하세요',
         ]);
         continue;
       }
@@ -629,21 +716,53 @@ export function detectPage(info: PageInfo, ink: Ink): Block[] {
 }
 export function linkContinuations(blocks: Block[]): Block[] {
   const out: Block[] = [];
-  for (const b of blocks) {
+  for (let index = 0; index < blocks.length; index++) {
+    const b = blocks[index];
     const prev = out.at(-1);
+    const page = b.fragments[0]?.page;
+    const nextProblem = blocks
+      .slice(index + 1)
+      .find(
+        (candidate) =>
+          candidate.fragments[0]?.page === page &&
+          candidate.kind === 'problem' &&
+          Number.isFinite(Number(candidate.label)),
+      );
+    const expectedPrevious = nextProblem
+      ? String(Number(nextProblem.label) - 1)
+      : undefined;
+    const numberedTarget = expectedPrevious
+      ? out.findLast(
+          (candidate) =>
+            candidate.kind === 'problem' &&
+            candidate.label === expectedPrevious,
+        )
+      : undefined;
+    const nextNumber = Number(nextProblem?.label);
+    const rangedInstruction =
+      prev?.kind === 'instruction' &&
+      prev.range &&
+      Number.isFinite(nextNumber) &&
+      nextNumber >= prev.range[0] &&
+      nextNumber <= prev.range[1]
+        ? prev
+        : undefined;
+    const target = rangedInstruction ?? numberedTarget ?? prev;
     if (
       b.kind === 'unassigned' &&
-      prev &&
-      prev.kind !== 'unassigned' &&
+      target &&
+      (target.kind === 'problem' ||
+        (target.kind === 'instruction' && !!target.range)) &&
       b.warnings.some((w) => w.includes('앞부분'))
     ) {
-      out[out.length - 1] = {
-        ...prev,
-        fragments: [...prev.fragments, ...b.fragments],
+      const targetIndex = out.findLastIndex((candidate) => candidate === target);
+      out[targetIndex] = {
+        ...target,
+        fragments: [...target.fragments, ...b.fragments],
         reviewed: false,
         warnings: [
-          ...prev.warnings,
-          `${prev.kind === 'instruction' ? '공통 지시문' : '문제'}의 이어지는 조각을 임시 연결했습니다. 연결이 맞는지 확인하세요`,
+          ...target.warnings,
+          `${target.kind === 'instruction' ? '공통 지시문' : '문제'}의 이어지는 조각을 임시 연결했습니다. 연결이 맞는지 확인하세요`,
         ],
       };
     } else out.push(b);
@@ -655,15 +774,23 @@ export function numberAudit(blocks: Block[]) {
     .filter((b) => b.kind === 'problem')
     .map((b) => Number(b.label))
     .filter(Number.isFinite);
-  const duplicates = numbers.filter((n, i) => numbers.indexOf(n) !== i);
+  const groups: number[][] = [];
+  for (const number of numbers) {
+    const group = groups.at(-1);
+    if (!group || number < group.at(-1)!) groups.push([number]);
+    else group.push(number);
+  }
+  const duplicates = groups.flatMap((group) =>
+    group.filter((n, i) => group.indexOf(n) !== i),
+  );
   const missing: number[] = [];
-  if (numbers.length) {
+  for (const group of groups) {
     for (
-      let n = Math.min(...numbers);
-      n <= Math.max(...numbers) && missing.length < 100;
+      let n = Math.min(...group);
+      n <= Math.max(...group) && missing.length < 100;
       n++
     )
-      if (!numbers.includes(n)) missing.push(n);
+      if (!group.includes(n)) missing.push(n);
   }
   return { missing, duplicates: [...new Set(duplicates)] };
 }
