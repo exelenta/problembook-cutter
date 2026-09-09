@@ -641,6 +641,15 @@ const serwaySpans: Span[] = [
     font: 'bold',
   },
   {
+    text: 'See the Preface for an explanation of the icons used in this problems set.',
+    x: 40,
+    y: 230,
+    w: 205,
+    h: 9,
+    baseline: 239,
+    font: 'regular',
+  },
+  {
     text: 'SECTION 34.1',
     x: 40,
     y: 250,
@@ -678,6 +687,24 @@ const serwaySpans: Span[] = [
     font: 'bold',
   },
   { text: '2.', x: 40, y: 360, w: 12, h: 10, baseline: 370, font: 'bold' },
+  {
+    text: 'addItIonal PRobleMs',
+    x: 330,
+    y: 395,
+    w: 115,
+    h: 11,
+    baseline: 406,
+    font: 'bold',
+  },
+  {
+    text: 'CHallenge PRobleMs',
+    x: 330,
+    y: 445,
+    w: 115,
+    h: 11,
+    baseline: 456,
+    font: 'bold',
+  },
 ];
 const serwayInk: Ink = {
   width: 1200,
@@ -715,11 +742,28 @@ assert.ok(
 );
 assert.ok(
   serwayBlocks.some(
+    (block) => block.kind === 'instruction' && block.label === 'Problems 안내',
+  ),
+  'The note below the Problems band is a separate instruction block',
+);
+assert.ok(
+  serwayBlocks.some(
     (block) =>
       block.kind === 'instruction' &&
       block.label === 'SECTION 34.1 The Nature of Light',
   ),
   'Serway SECTION 34.x labels are separate heading blocks',
+);
+assert.ok(
+  serwayBlocks.some(
+    (block) =>
+      block.kind === 'instruction' && block.label === 'Additional Problems',
+  ) &&
+    serwayBlocks.some(
+      (block) =>
+        block.kind === 'instruction' && block.label === 'Challenge Problems',
+    ),
+  'Additional and Challenge Problems are normalized heading blocks',
 );
 assert.equal(
   serwayBlocks.filter(

@@ -341,6 +341,14 @@ export function inferLayout(
       a: body.y,
       b: Math.min(bottom(body), bottom(exerciseHeader) + 8),
     });
+  const problemsHeader = textRuns(spans, body).find((run) =>
+    /^Problems\s*$/i.test(run.text.trim()),
+  );
+  if (problemsHeader)
+    candidates.push({
+      a: body.y,
+      b: Math.min(bottom(body), bottom(problemsHeader) + 4),
+    });
   // Decorative horizontal rules may cross the gutter, but they do not change
   // the reading layout. Only actual text spanning both columns creates a
   // full-width band.
@@ -393,6 +401,16 @@ type Event = {
   label: string;
   range?: [number, number];
 };
+function normalizedHeading(text: string): string {
+  const repaired = text
+    .trim()
+    .replace(/^s\s*e\s*c\s*t\s*i\s*o\s*n\s*/i, 'SECTION ');
+  if (/^Problems\s*$/i.test(repaired)) return 'Problems';
+  if (/^Additional\s+Problems\s*$/i.test(repaired)) return 'Additional Problems';
+  if (/^Challenge\s+Problems\s*$/i.test(repaired)) return 'Challenge Problems';
+  const section = repaired.match(/^SECTION\s*(\d+\.\d+)\s*(.*)$/i);
+  return section ? `SECTION ${section[1]} ${section[2]}`.trim() : repaired;
+}
 type TextRun = Rect & {
   baseline: number;
   text: string;
@@ -557,17 +575,24 @@ function events(spans: Span[], r: Rect): Event[] {
         range: range ? [+range[1], +range[2]] : undefined,
       });
     } else if (
-      /^(?:Problems\s*$|Discussion Problems|Computer Lab Assignments|Exercises?\s*\d|Answers\b|Chapter\s+\d)/i.test(
+      /^(?:Problems\s*$|Additional Problems|Challenge Problems|Discussion Problems|Computer Lab Assignments|Exercises?\s*\d|Answers\b|Chapter\s+\d)/i.test(
         text,
       )
     )
-      es.push({ span: t, kind: 'instruction', label: text });
+      es.push({ span: t, kind: 'instruction', label: normalizedHeading(text) });
+    else if (
+      /^See the Preface for an explanation of the icons used in this problems set\b/i.test(
+        text,
+      )
+    )
+      es.push({ span: t, kind: 'instruction', label: 'Problems 안내' });
   }
   for (const run of textRuns(inside, r)) {
+    const heading = normalizedHeading(run.text);
     if (
-      (/^EXERCISES?\b/.test(run.text.trim()) ||
-        /^(?:Problems\s*$|Discussion Problems|Computer Lab Assignments|Section\s+\d+\.\d+\b)/i.test(
-          run.text.trim(),
+      (/^EXERCISES?\b/.test(heading) ||
+        /^(?:Problems\s*$|Additional Problems|Challenge Problems|Discussion Problems|Computer Lab Assignments|Section\s+\d+\.\d+\b)/i.test(
+          heading,
         )) &&
       !es.some(
         (e) =>
@@ -577,14 +602,15 @@ function events(spans: Span[], r: Rect): Event[] {
       )
     )
       es.push({
-        span: { ...run, text: run.text },
+        span: { ...run, text: heading },
         kind: 'instruction',
-        label: run.text,
+        label: heading,
       });
   }
   for (const line of textLines(inside, r)) {
-    const namedHeading = line.text.match(
-        /^(EXERCISES?\b.*|Problems\s*|Discussion\s+Problems\b.*|Computer\s+Lab\s+Assignments\b.*|SECTION\s+\d+\.\d+\b.*)$/i,
+    const normalizedLine = normalizedHeading(line.text),
+      namedHeading = normalizedLine.match(
+        /^(EXERCISES?\b.*|Problems\s*|Additional\s+Problems\b.*|Challenge\s+Problems\b.*|Discussion\s+Problems\b.*|Computer\s+Lab\s+Assignments\b.*|SECTION\s+\d+\.\d+\b.*)$/i,
       )?.[1],
       subsection = line.text.match(
         /^(\d+\.\d+\.\d+)\s*([A-Z]|\p{Script=Hangul})(.*)$/u,
