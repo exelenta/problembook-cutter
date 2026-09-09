@@ -1078,6 +1078,64 @@ p {
     padding: 20px 60px 50px;
   }
 }
+@media (min-width: 1200px) {
+  /* Keep the desktop document chrome compact so the source page gets the
+     majority of the viewport height, even on 16:9 laptop displays. */
+  .app.has-document .topbar {
+    height: 52px;
+    padding-inline: 20px;
+  }
+  .app.has-document .brand {
+    font-size: 18px;
+  }
+  .app.has-document .top-actions {
+    gap: 7px;
+  }
+  .app.has-document .top-actions .privacy {
+    font-size: 12px;
+    margin-right: 3px;
+  }
+  .app.has-document .top-actions button {
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .app.has-document .notice {
+    min-height: 34px;
+    padding: 6px 20px;
+    font-size: 13px;
+  }
+  .document-bar {
+    min-height: 48px;
+    padding: 4px 20px;
+  }
+  .editor-tabs {
+    height: 36px !important;
+  }
+  .editor-tabs button {
+    height: 30px;
+    padding: 5px 14px;
+    font-size: 13px;
+  }
+  .canvas-toolbar {
+    min-height: 44px;
+    padding: 5px 12px;
+  }
+  .canvas-actions {
+    min-height: 38px;
+    padding: 2px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .drawing-tools button {
+    padding-block: 5px;
+  }
+  .canvas-help {
+    display: none;
+  }
+  .canvas-scroll {
+    padding-top: 12px;
+  }
+}
 @media (max-width: 1199px) {
   .app.has-document {
     height: auto;
