@@ -281,6 +281,78 @@ assert.ok(
   'Mixed layout supports two columns changing to one column',
 );
 
+// A decorative horizontal rule must not turn a two-column page into a thin
+// full-width layout region.
+const ruledInk: Ink = {
+    width: 1200,
+    height: 1600,
+    scale: 2,
+    data: new Uint8Array(1200 * 1600),
+  },
+  ruledSpans: Span[] = [
+    { text: '1.', x: 40, y: 100, w: 12, h: 10, baseline: 110, font: 'bold' },
+    { text: '11.', x: 330, y: 100, w: 18, h: 10, baseline: 110, font: 'bold' },
+    { text: '2.', x: 40, y: 500, w: 12, h: 10, baseline: 510, font: 'bold' },
+    { text: '12.', x: 330, y: 500, w: 18, h: 10, baseline: 510, font: 'bold' },
+    {
+      text: 'x(t) = a very wide equation that slightly crosses the gutter',
+      x: 170,
+      y: 340,
+      w: 250,
+      h: 10,
+      baseline: 350,
+      font: 'regular',
+    },
+  ];
+for (const span of ruledSpans)
+  for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
+    ruledInk.data.fill(
+      1,
+      y * ruledInk.width + span.x * 2,
+      y * ruledInk.width + (span.x + span.w) * 2,
+    );
+ruledInk.data.fill(1, 700 * ruledInk.width + 70, 700 * ruledInk.width + 1130);
+const ruledLayout = inferLayout(600, 800, ruledSpans, ruledInk);
+assert.ok(
+  ruledLayout.regions?.every((region) => region.columns.length === 1),
+  'A long rule or incidental wide equation does not create a full-width object',
+);
+
+const nextSectionInk: Ink = {
+    width: 1200,
+    height: 1600,
+    scale: 2,
+    data: new Uint8Array(1200 * 1600),
+  },
+  nextSectionSpans: Span[] = [
+    { text: 'EXERCISES 4.3', x: 40, y: 70, w: 150, h: 14, baseline: 84, font: 'bold' },
+    { text: '1.', x: 40, y: 120, w: 12, h: 10, baseline: 130, font: 'bold' },
+    { text: '21.', x: 330, y: 120, w: 18, h: 10, baseline: 130, font: 'bold' },
+    { text: '4.4', x: 40, y: 500, w: 42, h: 12, baseline: 512, font: 'bold' },
+    {
+      text: 'Undetermined Coefficients',
+      x: 100,
+      y: 500,
+      w: 260,
+      h: 12,
+      baseline: 512,
+      font: 'bold',
+    },
+    { text: 'INTRODUCTION', x: 100, y: 550, w: 100, h: 10, baseline: 560, font: 'bold' },
+  ];
+for (const span of nextSectionSpans)
+  for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
+    nextSectionInk.data.fill(
+      1,
+      y * nextSectionInk.width + span.x * 2,
+      y * nextSectionInk.width + (span.x + span.w) * 2,
+    );
+const nextSectionLayout = inferLayout(600, 800, nextSectionSpans, nextSectionInk);
+assert.ok(
+  nextSectionLayout.body.y + nextSectionLayout.body.h < 500,
+  'A split next-section title excludes following concept material',
+);
+
 // Equation numbers must not masquerade as right-column problem anchors, and a
 // solid scanned-page strip must not enlarge every crop to the physical edge.
 const edgeInk: Ink = {
@@ -411,6 +483,115 @@ assert.equal(
   '1–10 공통 지시문',
   'Answer Problems ranges are common instructions, not exercise headers',
 );
+
+// Headings split into distant PDF text spans still form their own block.
+const splitHeadingInk: Ink = {
+    width: 1200,
+    height: 800,
+    scale: 2,
+    data: new Uint8Array(1200 * 800),
+  },
+  splitHeadingSpans: Span[] = [
+    { text: '22.', x: 40, y: 70, w: 18, h: 10, baseline: 80, font: 'bold' },
+    { text: 'Solve.', x: 62, y: 70, w: 60, h: 10, baseline: 80, font: 'regular' },
+    { text: 'Discussion', x: 40, y: 150, w: 65, h: 13, baseline: 163, font: 'bold' },
+    { text: 'Problems', x: 120, y: 150, w: 55, h: 13, baseline: 163, font: 'bold' },
+    { text: '23.', x: 40, y: 190, w: 18, h: 10, baseline: 200, font: 'bold' },
+    { text: 'Discuss.', x: 62, y: 190, w: 80, h: 10, baseline: 200, font: 'regular' },
+  ];
+for (const span of splitHeadingSpans)
+  for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
+    splitHeadingInk.data.fill(
+      1,
+      y * splitHeadingInk.width + span.x * 2,
+      y * splitHeadingInk.width + (span.x + span.w) * 2,
+    );
+const splitHeadingBlocks = detectPage(
+  {
+    page: 1,
+    width: 600,
+    height: 400,
+    spans: splitHeadingSpans,
+    body: { x: 32, y: 50, w: 250, h: 190 },
+    columns: [],
+    regions: [{ x: 32, y: 50, w: 250, h: 190, columns: [] }],
+  },
+  splitHeadingInk,
+);
+assert.ok(
+  splitHeadingBlocks.some(
+    (block) =>
+      block.kind === 'instruction' && /^Discussion Problems/i.test(block.label),
+  ),
+  'A split Discussion Problems heading is separated from the prior problem',
+);
+assert.equal(
+  splitHeadingBlocks.find((block) => block.label === '22')?.fragments[0].rect.w,
+  250,
+  'Problem crops retain the complete source-column width',
+);
+
+const continuationBlocks: Block[] = [
+  {
+    id: 'p43',
+    label: '43',
+    kind: 'problem',
+    fragments: [{ id: 'p43-a', page: 1, rect: { x: 320, y: 300, w: 240, h: 80 } }],
+    selected: true,
+    reviewed: false,
+    warnings: [],
+  },
+  {
+    id: 'p18',
+    label: '18',
+    kind: 'problem',
+    fragments: [{ id: 'p18-a', page: 2, rect: { x: 40, y: 60, w: 240, h: 300 } }],
+    selected: true,
+    reviewed: false,
+    warnings: [],
+  },
+  {
+    id: 'continued',
+    label: '이어짐 / 미분류',
+    kind: 'unassigned',
+    fragments: [{ id: 'p43-b', page: 2, rect: { x: 320, y: 60, w: 240, h: 220 } }],
+    selected: true,
+    reviewed: false,
+    warnings: ['단 또는 페이지 앞부분입니다. 이전 문제와 이어지는지 확인하세요'],
+  },
+  {
+    id: 'p44',
+    label: '44',
+    kind: 'problem',
+    fragments: [{ id: 'p44-a', page: 2, rect: { x: 320, y: 280, w: 240, h: 80 } }],
+    selected: true,
+    reviewed: false,
+    warnings: [],
+  },
+];
+assert.equal(
+  linkContinuations(continuationBlocks).find((block) => block.label === '43')
+    ?.fragments.length,
+  2,
+  'A right-column continuation links to the number before the next problem',
+);
+assert.deepEqual(
+  numberAudit(
+    [1, 2, 3, 1, 2, 3].map((number, index) => ({
+      id: `audit-${index}`,
+      label: String(number),
+      kind: 'problem' as const,
+      fragments: [
+        { id: `audit-fragment-${index}`, page: index + 1, rect: { x: 0, y: 0, w: 1, h: 1 } },
+      ],
+      selected: true,
+      reviewed: false,
+      warnings: [],
+    })),
+  ),
+  { missing: [], duplicates: [] },
+  'Repeated numbering in separate requested sections is not a duplicate warning',
+);
 if (filename) {
   const expected =
     doc.numPages === 4
@@ -470,7 +651,10 @@ assert.equal(
   blocks.filter((b) => b.kind !== 'instruction' && b.selected).length,
 );
 for (const p of placements) {
-  assert.ok(p.y + p.contentHeight + p.answerHeight <= 841.89 - 34 + 0.1);
+  assert.ok(
+    p.y + p.contentHeight + p.answerHeight <= 841.89 - 34 + 0.1,
+    `Placement stays on A4: ${JSON.stringify(p)}`,
+  );
   for (const f of p.fragments)
     assert.ok(
       p.x + f.rect.w * p.scale <= 595.276 - 34 + 0.1,
