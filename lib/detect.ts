@@ -169,8 +169,11 @@ export function inferLayout(
   const initialRuns = textRuns(spans, initial);
   const exercise =
     initialRuns.find((run) =>
-      /^Answers to selected (?:odd-numbered )?problems\b/i.test(run.text.trim()),
+      /^Answers to selected (?:odd-numbered )?problems\b/i.test(
+        run.text.trim(),
+      ),
     ) ??
+    initialRuns.find((run) => /^Problems\s*$/i.test(run.text.trim())) ??
     initialRuns.find(
       (run) =>
         /^EXERCISES?\b/i.test(run.text.trim()) &&
@@ -287,8 +290,7 @@ export function inferLayout(
   // Trimming can shorten one physical page edge when the selected exercise
   // ends near the top. The true gutter still follows the original page body,
   // so use that center when no second-column number anchor is available.
-  const center =
-    second !== undefined ? second - 7 : initial.x + initial.w / 2;
+  const center = second !== undefined ? second - 7 : initial.x + initial.w / 2;
   const gs = gaps(
     p,
     Math.max(body.x + body.w * 0.3, center - width * 0.045),
@@ -555,7 +557,7 @@ function events(spans: Span[], r: Rect): Event[] {
         range: range ? [+range[1], +range[2]] : undefined,
       });
     } else if (
-      /^(?:Discussion Problems|Computer Lab Assignments|Exercises?\s*\d|Answers\b|Chapter\s+\d)/i.test(
+      /^(?:Problems\s*$|Discussion Problems|Computer Lab Assignments|Exercises?\s*\d|Answers\b|Chapter\s+\d)/i.test(
         text,
       )
     )
@@ -564,7 +566,9 @@ function events(spans: Span[], r: Rect): Event[] {
   for (const run of textRuns(inside, r)) {
     if (
       (/^EXERCISES?\b/.test(run.text.trim()) ||
-        /^(?:Discussion Problems|Computer Lab Assignments)/i.test(run.text)) &&
+        /^(?:Problems\s*$|Discussion Problems|Computer Lab Assignments|Section\s+\d+\.\d+\b)/i.test(
+          run.text.trim(),
+        )) &&
       !es.some(
         (e) =>
           e.kind === 'instruction' &&
@@ -580,8 +584,8 @@ function events(spans: Span[], r: Rect): Event[] {
   }
   for (const line of textLines(inside, r)) {
     const namedHeading = line.text.match(
-      /^(EXERCISES?\b.*|Discussion\s+Problems\b.*|Computer\s+Lab\s+Assignments\b.*)$/i,
-    )?.[1],
+        /^(EXERCISES?\b.*|Problems\s*|Discussion\s+Problems\b.*|Computer\s+Lab\s+Assignments\b.*|SECTION\s+\d+\.\d+\b.*)$/i,
+      )?.[1],
       subsection = line.text.match(
         /^(\d+\.\d+\.\d+)\s*([A-Z]|\p{Script=Hangul})(.*)$/u,
       ),
@@ -763,7 +767,9 @@ export function linkContinuations(blocks: Block[]): Block[] {
         (target.kind === 'instruction' && !!target.range)) &&
       b.warnings.some((w) => w.includes('앞부분'))
     ) {
-      const targetIndex = out.findLastIndex((candidate) => candidate === target);
+      const targetIndex = out.findLastIndex(
+        (candidate) => candidate === target,
+      );
       out[targetIndex] = {
         ...target,
         fragments: [...target.fragments, ...b.fragments],

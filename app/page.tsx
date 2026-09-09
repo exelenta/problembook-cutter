@@ -176,7 +176,8 @@ function CropPreview({
 async function blobBase64(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('제보 첨부 파일을 읽지 못했습니다.'));
+    reader.onerror = () =>
+      reject(new Error('제보 첨부 파일을 읽지 못했습니다.'));
     reader.onload = () =>
       resolve(
         typeof reader.result === 'string'
@@ -315,6 +316,19 @@ export default function Home() {
     setBlocks(next);
     invalidateOutput();
   }
+  function undo() {
+    const previous = history.at(-1);
+    if (!previous) return;
+    setBlocks(previous);
+    setHistory((h) => h.slice(0, -1));
+    invalidateOutput();
+  }
+  function deleteActive() {
+    if (!active) return;
+    commit(blocks.filter((block) => block.id !== active));
+    setActive(undefined);
+    setFragment(undefined);
+  }
   function update(id: string, fn: (b: Block) => Block) {
     commit(blocks.map((b) => (b.id === id ? fn(b) : b)));
   }
@@ -445,7 +459,9 @@ export default function Home() {
         );
       const host = window.location.hostname;
       const endpoint =
-        host.endsWith('chatgpt.site') || host === 'localhost' || host === '127.0.0.1'
+        host.endsWith('chatgpt.site') ||
+        host === 'localhost' ||
+        host === '127.0.0.1'
           ? 'https://problembook-cutter.vercel.app/api/locate-sections'
           : '/api/locate-sections';
       setProgress(78);
@@ -468,7 +484,8 @@ export default function Home() {
         normalized_request?: string;
         error?: string;
       };
-      if (!response.ok) throw new Error(data.error || 'AI 범위 검색에 실패했습니다.');
+      if (!response.ok)
+        throw new Error(data.error || 'AI 범위 검색에 실패했습니다.');
       const found = validateSectionRanges(data.ranges ?? [], doc.numPages);
       setMatches(found);
       setProgress(100);
@@ -815,7 +832,10 @@ export default function Home() {
         const candidate = await blobBase64(
           await boundaryOverlay(currentRendered, blocks, page),
         );
-        if (candidate.length <= 1_500_000 && sourcePage.length + candidate.length < 3_900_000)
+        if (
+          candidate.length <= 1_500_000 &&
+          sourcePage.length + candidate.length < 3_900_000
+        )
           overlay = candidate;
       } catch {}
       const pageBlocks = blocks
@@ -859,7 +879,9 @@ export default function Home() {
           error?: string;
         };
       if (!response.ok)
-        throw new Error(result.error || `버그 제보 전송 실패 (${response.status})`);
+        throw new Error(
+          result.error || `버그 제보 전송 실패 (${response.status})`,
+        );
       setMessage(
         `PDF ${page}페이지의 원본과 경계 결과를 개발자에게 전송했습니다.`,
       );
@@ -946,6 +968,42 @@ export default function Home() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [blocks.length]);
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (busy || tab !== 'edit') return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          !!target.closest('input, textarea, select'))
+      )
+        return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        if (!history.length) return;
+        event.preventDefault();
+        setBlocks(history.at(-1)!);
+        setHistory((items) => items.slice(0, -1));
+        invalidateOutput();
+      } else if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        active
+      ) {
+        event.preventDefault();
+        setHistory((items) => [...items.slice(-29), blocks]);
+        setBlocks(blocks.filter((block) => block.id !== active));
+        invalidateOutput();
+        setActive(undefined);
+        setFragment(undefined);
+      } else if (event.key === 'Escape' && (active || mode !== 'select')) {
+        event.preventDefault();
+        setActive(undefined);
+        setFragment(undefined);
+        setMode('select');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [active, blocks, busy, history, mode, tab]);
   useEffect(() => {
     const context = (
       document as Document & {
@@ -1443,12 +1501,9 @@ export default function Home() {
                     </button>
                     <button
                       aria-label="영역 편집 되돌리기"
+                      title="되돌리기 (Ctrl+Z)"
                       disabled={!!busy || !history.length}
-                      onClick={() => {
-                        setBlocks(history.at(-1)!);
-                        setHistory((h) => h.slice(0, -1));
-                        invalidateOutput();
-                      }}
+                      onClick={undo}
                     >
                       <Undo2 size={17} />
                     </button>
@@ -1777,10 +1832,8 @@ export default function Home() {
                         )}
                         <button
                           disabled={!!busy}
-                          onClick={() => {
-                            commit(blocks.filter((b) => b.id !== current.id));
-                            setActive(undefined);
-                          }}
+                          title="영역 삭제 (Delete)"
+                          onClick={deleteActive}
                         >
                           <Trash2 size={14} />
                           영역 삭제

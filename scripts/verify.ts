@@ -28,9 +28,7 @@ import type { Block, Ink, PageInfo, Span, Settings } from '../lib/model';
 const require = createRequire(import.meta.url),
   pdfRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
 
-assert.deepEqual(parsePageRanges('23-26, 29-30', 40), [
-  23, 24, 25, 26, 29, 30,
-]);
+assert.deepEqual(parsePageRanges('23-26, 29-30', 40), [23, 24, 25, 26, 29, 30]);
 assert.equal(formatPageRanges([30, 23, 24, 25, 26, 29, 29]), '23-26, 29-30');
 assert.throws(() => parsePageRanges('23-20', 40));
 assert.throws(() => parsePageRanges('41', 40));
@@ -44,7 +42,8 @@ const longBook = Array.from({ length: 462 }, (_, index) => ({
   page: index + 1,
   text: `Chapter text on PDF page ${index + 1}`,
 }));
-longBook[9].text = 'CONTENTS EXERCISES 4.1 EXERCISES 4.2 EXERCISES 4.3 EXERCISES 4.4';
+longBook[9].text =
+  'CONTENTS EXERCISES 4.1 EXERCISES 4.2 EXERCISES 4.3 EXERCISES 4.4';
 longBook[199].text = 'EXERCISES 4.1 1. Solve. 2. Solve. 3. Solve.';
 longBook[209].text = 'EXERCISES 4.2 1. Solve. 2. Solve. 3. Solve.';
 longBook[219].text = 'EXERCISES 4.3 1. Solve. 2. Solve. 3. Solve.';
@@ -105,7 +104,10 @@ const aiResponse = await locateSections(
   }),
 );
 assert.equal(aiResponse.status, 200);
-assert.equal(aiResponse.headers.get('access-control-allow-origin'), 'http://localhost:3000');
+assert.equal(
+  aiResponse.headers.get('access-control-allow-origin'),
+  'http://localhost:3000',
+);
 const aiResult = (await aiResponse.json()) as { ranges: unknown[] };
 assert.deepEqual(aiResult.ranges[0], {
   label: 'Exercises 4.1',
@@ -122,7 +124,8 @@ process.env.BUG_REPORT_EMAIL = 'owner@example.com';
 let sentMail: Record<string, unknown> | undefined;
 globalThis.fetch = async (_input, init) => {
   const requestBody = init?.body;
-  if (typeof requestBody !== 'string') throw new Error('Expected JSON mail body');
+  if (typeof requestBody !== 'string')
+    throw new Error('Expected JSON mail body');
   sentMail = JSON.parse(requestBody) as Record<string, unknown>;
   return Response.json({ id: 'email-test-id' });
 };
@@ -336,7 +339,15 @@ const ruledInk: Ink = {
     { text: '11.', x: 330, y: 100, w: 18, h: 10, baseline: 110, font: 'bold' },
     { text: '2.', x: 40, y: 500, w: 12, h: 10, baseline: 510, font: 'bold' },
     { text: '12.', x: 330, y: 500, w: 18, h: 10, baseline: 510, font: 'bold' },
-    { text: 'wide equation', x: 170, y: 340, w: 250, h: 10, baseline: 350, font: 'regular' },
+    {
+      text: 'wide equation',
+      x: 170,
+      y: 340,
+      w: 250,
+      h: 10,
+      baseline: 350,
+      font: 'regular',
+    },
   ];
 for (const span of ruledSpans)
   for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
@@ -364,7 +375,15 @@ const nextSectionInk: Ink = {
     { text: '21.', x: 330, y: 100, w: 18, h: 10, baseline: 110, font: 'bold' },
     { text: '4.4', x: 40, y: 500, w: 42, h: 22, baseline: 522, font: 'bold' },
     { text: 'U', x: 100, y: 506, w: 12, h: 16, baseline: 522, font: 'bold' },
-    { text: 'ndetermined Coefficients', x: 112, y: 506, w: 240, h: 16, baseline: 522, font: 'bold' },
+    {
+      text: 'ndetermined Coefficients',
+      x: 112,
+      y: 506,
+      w: 240,
+      h: 16,
+      baseline: 522,
+      font: 'bold',
+    },
   ];
 for (const span of nextSectionSpans)
   for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
@@ -519,8 +538,24 @@ const splitHeadingInk: Ink = {
   },
   splitHeadingSpans: Span[] = [
     { text: '22.', x: 40, y: 70, w: 18, h: 10, baseline: 80, font: 'bold' },
-    { text: 'Discussion P', x: 40, y: 150, w: 70, h: 13, baseline: 163, font: 'bold' },
-    { text: 'roblems', x: 110, y: 150, w: 50, h: 13, baseline: 163, font: 'bold' },
+    {
+      text: 'Discussion P',
+      x: 40,
+      y: 150,
+      w: 70,
+      h: 13,
+      baseline: 163,
+      font: 'bold',
+    },
+    {
+      text: 'roblems',
+      x: 110,
+      y: 150,
+      w: 50,
+      h: 13,
+      baseline: 163,
+      font: 'bold',
+    },
     { text: '23.', x: 40, y: 190, w: 18, h: 10, baseline: 200, font: 'bold' },
   ];
 for (const span of splitHeadingSpans)
@@ -552,7 +587,15 @@ assert.ok(
 const subsectionSpans: Span[] = [
   { text: '14.', x: 40, y: 70, w: 18, h: 10, baseline: 80, font: 'bold' },
   { text: '4.1.2', x: 40, y: 150, w: 38, h: 13, baseline: 163, font: 'bold' },
-  { text: 'Homogeneous Equations', x: 84, y: 150, w: 150, h: 13, baseline: 163, font: 'bold' },
+  {
+    text: 'Homogeneous Equations',
+    x: 84,
+    y: 150,
+    w: 150,
+    h: 13,
+    baseline: 163,
+    font: 'bold',
+  },
   { text: '15.', x: 40, y: 190, w: 18, h: 10, baseline: 200, font: 'bold' },
 ];
 assert.ok(
@@ -575,12 +618,127 @@ assert.ok(
   'A numbered exercise subsection is a separate heading block',
 );
 
+// Serway-style chapters place an unrelated numbered activity before a large
+// "Problems" band, then use SECTION 34.x labels inside the exercise set.
+const serwaySpans: Span[] = [
+  {
+    text: 'Think–Pair–Share',
+    x: 35,
+    y: 65,
+    w: 220,
+    h: 18,
+    baseline: 82,
+    font: 'bold',
+  },
+  { text: '1.', x: 40, y: 105, w: 12, h: 10, baseline: 115, font: 'bold' },
+  {
+    text: 'Problems',
+    x: 35,
+    y: 205,
+    w: 110,
+    h: 20,
+    baseline: 223,
+    font: 'bold',
+  },
+  {
+    text: 'SECTION 34.1',
+    x: 40,
+    y: 250,
+    w: 82,
+    h: 12,
+    baseline: 262,
+    font: 'bold',
+  },
+  {
+    text: 'The Nature of Light',
+    x: 126,
+    y: 250,
+    w: 120,
+    h: 12,
+    baseline: 262,
+    font: 'bold',
+  },
+  { text: '1.', x: 40, y: 280, w: 12, h: 10, baseline: 290, font: 'bold' },
+  {
+    text: 'SECTION 34.2',
+    x: 40,
+    y: 330,
+    w: 82,
+    h: 12,
+    baseline: 342,
+    font: 'bold',
+  },
+  {
+    text: 'Ray Optics',
+    x: 126,
+    y: 330,
+    w: 70,
+    h: 12,
+    baseline: 342,
+    font: 'bold',
+  },
+  { text: '2.', x: 40, y: 360, w: 12, h: 10, baseline: 370, font: 'bold' },
+];
+const serwayInk: Ink = {
+  width: 1200,
+  height: 1000,
+  scale: 2,
+  data: new Uint8Array(1200 * 1000),
+};
+for (const span of serwaySpans)
+  for (let y = span.y * 2; y < (span.y + span.h) * 2; y++)
+    serwayInk.data.fill(
+      1,
+      y * serwayInk.width + span.x * 2,
+      y * serwayInk.width + (span.x + span.w) * 2,
+    );
+const serwayLayout = inferLayout(600, 500, serwaySpans, serwayInk);
+assert.ok(
+  serwayLayout.body.y > 180,
+  'A standalone Problems band excludes numbered material above the exercise set',
+);
+const serwayBlocks = detectPage(
+  {
+    page: 1,
+    width: 600,
+    height: 500,
+    spans: serwaySpans,
+    ...serwayLayout,
+  },
+  serwayInk,
+);
+assert.ok(
+  serwayBlocks.some(
+    (block) => block.kind === 'instruction' && /^Problems$/i.test(block.label),
+  ),
+  'The Problems band is retained as a heading block',
+);
+assert.ok(
+  serwayBlocks.some(
+    (block) =>
+      block.kind === 'instruction' &&
+      block.label === 'SECTION 34.1 The Nature of Light',
+  ),
+  'Serway SECTION 34.x labels are separate heading blocks',
+);
+assert.equal(
+  serwayBlocks.filter(
+    (block) => block.kind === 'problem' && block.label === '1',
+  ).length,
+  1,
+  'The activity number above Problems is not detected as an exercise',
+);
+
 const mkProblem = (label: string, page: number): Block => ({
   id: `problem-${page}-${label}`,
   label,
   kind: 'problem',
   fragments: [
-    { id: `fragment-${page}-${label}`, page, rect: { x: 0, y: 0, w: 10, h: 10 } },
+    {
+      id: `fragment-${page}-${label}`,
+      page,
+      rect: { x: 0, y: 0, w: 10, h: 10 },
+    },
   ],
   selected: true,
   reviewed: false,
@@ -593,10 +751,14 @@ const linked43 = linkContinuations([
     id: 'continued-43',
     label: '이어짐 / 미분류',
     kind: 'unassigned',
-    fragments: [{ id: 'fragment-43b', page: 2, rect: { x: 300, y: 0, w: 100, h: 50 } }],
+    fragments: [
+      { id: 'fragment-43b', page: 2, rect: { x: 300, y: 0, w: 100, h: 50 } },
+    ],
     selected: true,
     reviewed: false,
-    warnings: ['단 또는 페이지 앞부분입니다. 이전 문제와 이어지는지 확인하세요'],
+    warnings: [
+      '단 또는 페이지 앞부분입니다. 이전 문제와 이어지는지 확인하세요',
+    ],
   },
   mkProblem('44', 2),
 ]);
@@ -606,7 +768,11 @@ assert.equal(
   'A continuation links to the number immediately before the next problem',
 );
 assert.deepEqual(
-  numberAudit([1, 2, 3, 1, 2, 3].map((number, index) => mkProblem(String(number), index + 1))),
+  numberAudit(
+    [1, 2, 3, 1, 2, 3].map((number, index) =>
+      mkProblem(String(number), index + 1),
+    ),
+  ),
   { missing: [], duplicates: [] },
   'Repeated numbering in separate sections is not a duplicate warning',
 );
