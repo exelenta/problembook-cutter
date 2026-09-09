@@ -579,9 +579,17 @@ function events(spans: Span[], r: Rect): Event[] {
       });
   }
   for (const line of textLines(inside, r)) {
-    const heading = line.text.match(
+    const namedHeading = line.text.match(
       /^(EXERCISES?\b.*|Discussion\s+Problems\b.*|Computer\s+Lab\s+Assignments\b.*)$/i,
-    )?.[1];
+    )?.[1],
+      subsection = line.text.match(
+        /^(\d+\.\d+\.\d+)\s*([A-Z]|\p{Script=Hangul})(.*)$/u,
+      ),
+      heading =
+        namedHeading ??
+        (subsection
+          ? `${subsection[1]} ${subsection[2]}${subsection[3]}`.trim()
+          : undefined);
     if (
       heading &&
       !es.some(

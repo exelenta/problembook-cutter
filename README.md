@@ -34,6 +34,8 @@ pnpm build
 
 `dist/client`가 정적 프런트엔드 결과입니다. AI 범위 검색은 Vercel의 `api/locate-sections.ts` 함수가 담당하며 Vercel 프로젝트에 `OPENAI_API_KEY`를 설정해야 합니다. 모델은 기본적으로 `gpt-5.4-mini`를 사용하고 `OPENAI_MODEL`로 바꿀 수 있습니다. 서버에서도 후보를 48페이지, 페이지당 1,400자로 제한해 예상 밖의 대용량 API 호출을 막습니다.
 
+버그 제보 메일은 Vercel의 `api/bug-report.ts`와 Resend를 사용합니다. Vercel 환경변수에 `RESEND_API_KEY`와 수신 주소인 `BUG_REPORT_EMAIL`을 설정하세요. 발신 주소는 선택 환경변수 `BUG_REPORT_FROM`으로 지정하며, 없으면 `Problembook Cutter <onboarding@resend.dev>`를 사용합니다. Resend 기본 도메인은 계정 소유 이메일로 보내는 테스트 용도이므로 다른 주소로 보내려면 발신 도메인을 인증하고 `BUG_REPORT_FROM`을 설정해야 합니다. 제보 버튼은 사용자의 확인 뒤 현재 원본 한 페이지 PDF, 경계 JSON, 크기 제한 안에서 경계 오버레이 JPG만 전송합니다.
+
 ## 경계 검출과 출력
 
 - PDF.js로 원본을 144 dpi로 렌더링합니다. 텍스트 레이어는 문제 번호·공통 지시문 위치만 찾는 단서입니다. OCR·수식 인식은 하지 않습니다.
@@ -41,6 +43,7 @@ pnpm build
 - 연습문제 머리말 앞의 이전 개념과 다음 절의 큰 번호·제목 또는 구분선 뒤 개념은 자동 분석 범위에서 제외합니다. 문제 번호 뒤에 이어지는 `In Problem ...` 문장은 별도 공통 지시문으로 만들지 않습니다.
 - 같은 행의 여러 문제는 해당 구간의 수직 여백으로 분리합니다. 조각 범위의 모든 잉크를 포함하는 사각형과 여유분을 보존합니다.
 - `Discussion Problems`, `Computer Lab Assignments`처럼 PDF 내부에서 여러 텍스트 조각으로 저장된 소제목도 앞 문제와 분리합니다.
+- `4.1.1 Initial-Value ...`처럼 세 단계 번호가 붙은 연습문제 소단원 제목도 별도 구분 블록으로 분리합니다.
 - 다음 단·페이지 맨 위의 번호 없는 조각은 다음 문제 번호와 공통 지시문의 번호 범위를 함께 비교해 알맞은 이전 문제나 지시문에 임시 연결합니다.
 - 번호 누락·중복, 경계 양쪽의 잉크, 편집 후 미포함 영역을 각각 검사합니다. 번호가 다시 작아지는 단원 경계마다 새로 검사하므로 여러 단원에서 반복되는 번호는 중복으로 경고하지 않습니다.
 - PDF-lib의 원본 페이지 영역 임베딩으로 벡터·글꼴·수식을 보존합니다. 회전 페이지는 표시 좌표 기준 300 dpi 이미지로 붙입니다.
@@ -88,6 +91,7 @@ pnpm inspect:pages "경로/Differential_Equation_11e.pdf" "141-142,145-146,151-1
 | `lib/section-ranges.ts`      | 다중 PDF 페이지 구간 파싱·검증         |
 | `lib/ai-section-search.ts`   | 유료 AI 호출 전 로컬 후보 페이지 선별  |
 | `api/locate-sections.ts`     | OpenAI 기반 연습문제 범위 추론          |
+| `api/bug-report.ts`          | 현재 한 페이지와 경계 결과 메일 제보    |
 | `scripts/verify.ts`          | 합성·실제 예시 회귀 검사               |
 
 의존성은 각 프로젝트의 라이선스를 따릅니다. PDF.js의 글꼴·CMap·WASM은 실행/빌드 시 패키지에서 복사됩니다.

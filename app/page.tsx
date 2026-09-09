@@ -28,7 +28,9 @@ import {
   FolderOpen,
   ArrowUp,
   ArrowDown,
+  Bug,
 } from 'lucide-react';
+import { PDFDocument } from 'pdf-lib';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -169,6 +171,70 @@ function CropPreview({
       />
     </div>
   );
+}
+
+async function blobBase64(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('제보 첨부 파일을 읽지 못했습니다.'));
+    reader.onload = () =>
+      resolve(
+        typeof reader.result === 'string'
+          ? (reader.result.split(',')[1] ?? '')
+          : '',
+      );
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function boundaryOverlay(
+  rendered: Rendered,
+  blocks: Block[],
+  page: number,
+) {
+  const image = new Image();
+  image.src = rendered.url;
+  await image.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext('2d')!;
+  context.drawImage(image, 0, 0);
+  const scale = canvas.width / rendered.info.width;
+  context.lineWidth = Math.max(2, scale * 1.2);
+  context.font = `bold ${Math.max(13, Math.round(7 * scale))}px Arial, sans-serif`;
+  for (const block of blocks) {
+    for (const item of block.fragments.filter((part) => part.page === page)) {
+      const { rect } = item,
+        color =
+          block.kind === 'problem'
+            ? '#165ce0'
+            : block.kind === 'instruction'
+              ? '#c47b00'
+              : '#d14343',
+        x = rect.x * scale,
+        y = rect.y * scale;
+      context.strokeStyle = color;
+      context.strokeRect(x, y, rect.w * scale, rect.h * scale);
+      const label = block.label.slice(0, 50),
+        width = context.measureText(label).width + 8;
+      context.fillStyle = 'rgba(255,255,255,.9)';
+      context.fillRect(x, Math.max(0, y - 18), width, 18);
+      context.fillStyle = color;
+      context.fillText(label, x + 4, Math.max(13, y - 4));
+    }
+  }
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (result) =>
+        result ? resolve(result) : reject(new Error('경계 이미지 생성 실패')),
+      'image/jpeg',
+      0.8,
+    ),
+  );
+  canvas.width = 0;
+  canvas.height = 0;
+  return blob;
 }
 
 export default function Home() {
@@ -719,6 +785,90 @@ export default function Home() {
       'application/json',
     );
   }
+  async function sendBugReport() {
+    if (!doc || !bytes.current) return;
+    if (
+      !window.confirm(
+        `PDF ${page}페이지의 원본 한 페이지와 현재 경계 결과를 개발자 이메일로 전송합니다. 계속할까요?`,
+      )
+    )
+      return;
+    setBusy('현재 페이지 버그 제보 준비');
+    setError('');
+    setMessage('');
+    try {
+      const currentRendered = await getPage(page),
+        source = await PDFDocument.load(bytes.current),
+        onePage = await PDFDocument.create(),
+        [copied] = await onePage.copyPages(source, [page - 1]);
+      onePage.addPage(copied);
+      const pagePdf = await onePage.save({ useObjectStreams: true }),
+        sourcePage = await blobBase64(
+          new Blob([pagePdf.slice().buffer], { type: 'application/pdf' }),
+        );
+      if (sourcePage.length > 3_500_000)
+        throw new Error(
+          '현재 원본 페이지가 메일 제보 한도를 넘습니다. 프로젝트 JSON을 저장해 직접 전달해 주세요.',
+        );
+      let overlay: string | undefined;
+      try {
+        const candidate = await blobBase64(
+          await boundaryOverlay(currentRendered, blocks, page),
+        );
+        if (candidate.length <= 1_500_000 && sourcePage.length + candidate.length < 3_900_000)
+          overlay = candidate;
+      } catch {}
+      const pageBlocks = blocks
+          .filter((block) => block.fragments.some((item) => item.page === page))
+          .map((block) => ({
+            label: block.label,
+            kind: block.kind,
+            selected: block.selected,
+            reviewed: reviewedOnPage(block, page),
+            warnings: block.warnings,
+            range: block.range,
+            fragments: block.fragments.filter((item) => item.page === page),
+          })),
+        response = await fetch('/api/bug-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reportId: crypto.randomUUID(),
+            filename,
+            page,
+            pageCount: doc.numPages,
+            fingerprint: hash,
+            sourcePage,
+            overlay,
+            result: {
+              page: {
+                page: currentRendered.info.page,
+                width: currentRendered.info.width,
+                height: currentRendered.info.height,
+                body: currentRendered.info.body,
+                columns: currentRendered.info.columns,
+                regions: currentRendered.info.regions,
+              },
+              blocks: pageBlocks,
+              appUrl: location.href,
+              userAgent: navigator.userAgent,
+            },
+          }),
+        }),
+        result = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+      if (!response.ok)
+        throw new Error(result.error || `버그 제보 전송 실패 (${response.status})`);
+      setMessage(
+        `PDF ${page}페이지의 원본과 경계 결과를 개발자에게 전송했습니다.`,
+      );
+    } catch (e) {
+      report(e);
+    } finally {
+      setBusy('');
+    }
+  }
   async function restore(f?: File) {
     if (!f || !doc) return;
     setBusy('편집 프로젝트 불러오기');
@@ -862,7 +1012,9 @@ export default function Home() {
           </strong>
         </div>
         <div className="top-actions">
-          <span className="privacy">내 기기에서 처리 · 원본 그대로</span>
+          <span className="privacy">
+            기본 처리는 내 기기에서 · 제보 시 현재 페이지만 전송
+          </span>
           {doc && (
             <>
               <button disabled={!!busy} onClick={saveProject}>
@@ -876,6 +1028,14 @@ export default function Home() {
               >
                 <FolderOpen size={16} />
                 불러오기
+              </button>
+              <button
+                disabled={!!busy}
+                onClick={() => void sendBugReport()}
+                title="현재 원본 PDF 한 페이지와 경계 결과를 개발자에게 전송"
+              >
+                <Bug size={16} />
+                버그 제보
               </button>
               <button disabled={!!busy} onClick={() => input.current?.click()}>
                 다른 PDF
@@ -1192,7 +1352,11 @@ export default function Home() {
                           {b.fragments.length > 1
                             ? ` · ${b.fragments.length}조각 연결`
                             : ''}
-                          {b.kind === 'instruction' ? ' · 공통 지시문' : ''}
+                          {b.kind === 'instruction'
+                            ? b.range
+                              ? ' · 공통 지시문'
+                              : ' · 구분명'
+                            : ''}
                         </small>
                       </button>
                     </div>
@@ -1375,7 +1539,7 @@ export default function Home() {
                   </span>
                   <span>
                     <i className="legend-orange" />
-                    공통 지시문
+                    지시문 · 구분명
                   </span>
                   <span>
                     <i className="legend-green" />
@@ -1422,7 +1586,7 @@ export default function Home() {
                         }
                         items={[
                           ['problem', '문제'],
-                          ['instruction', '공통 지시문'],
+                          ['instruction', '지시문 / 구분명'],
                           ['unassigned', '미분류 / 이어짐'],
                         ]}
                       />

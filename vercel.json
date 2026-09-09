@@ -7,6 +7,9 @@
   "functions": {
     "api/locate-sections.ts": {
       "maxDuration": 60
+    },
+    "api/bug-report.ts": {
+      "maxDuration": 30
     }
   }
 }

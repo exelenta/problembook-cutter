@@ -132,8 +132,11 @@ if (verify) {
 
   assert.ok(byPage(141).info.body.y > 200, 'Page 141 excludes prior concept text');
   assert.equal(byPage(141).info.regions?.length, 2, 'Page 141 has one header band and two-column exercises');
+  assert.ok(hasHeading(141, /^4\.1\.1\s+Initial-Value and Boundary-Value Problems$/i));
+  assert.ok(hasHeading(141, /^4\.1\.2\s+Homogeneous Equations$/i));
   assert.deepEqual(problemNumbers(141), sequence(1, 16));
   assert.equal(byPage(142).info.regions?.length, 1, 'Page 142 has no thin full-width bands');
+  assert.ok(hasHeading(142, /^4\.1\.3\s+Nonhomogeneous Equations$/i));
   assert.ok(hasHeading(142, /^Discussion Problems$/i));
   assert.deepEqual(problemNumbers(142), sequence(17, 42));
 

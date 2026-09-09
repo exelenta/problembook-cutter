@@ -18,6 +18,7 @@ import { demoPdf } from '../lib/demo';
 import { validateProject } from '../lib/project';
 import { formatPageRanges, parsePageRanges } from '../lib/section-ranges';
 import { POST as locateSections } from '../api/locate-sections';
+import { POST as sendBugReport } from '../api/bug-report';
 import {
   extractSectionIds,
   selectCandidatePages,
@@ -115,6 +116,42 @@ assert.deepEqual(aiResult.ranges[0], {
 });
 globalThis.fetch = originalFetch;
 delete process.env.OPENAI_API_KEY;
+
+process.env.RESEND_API_KEY = 'test-resend-key';
+process.env.BUG_REPORT_EMAIL = 'owner@example.com';
+let sentMail: Record<string, unknown> | undefined;
+globalThis.fetch = async (_input, init) => {
+  const requestBody = init?.body;
+  if (typeof requestBody !== 'string') throw new Error('Expected JSON mail body');
+  sentMail = JSON.parse(requestBody) as Record<string, unknown>;
+  return Response.json({ id: 'email-test-id' });
+};
+const bugResponse = await sendBugReport(
+  new Request('https://problembook-cutter.vercel.app/api/bug-report', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'http://localhost:3000',
+    },
+    body: JSON.stringify({
+      reportId: '12345678-1234-1234-1234-123456789abc',
+      filename: 'sample.pdf',
+      page: 141,
+      pageCount: 462,
+      fingerprint: 'a'.repeat(64),
+      sourcePage: Buffer.from('%PDF-1.4\n%%EOF').toString('base64'),
+      result: { body: { x: 32, y: 218, w: 512, h: 513 }, blocks: [] },
+    }),
+  }),
+);
+assert.equal(bugResponse.status, 200);
+assert.deepEqual(sentMail?.to, ['owner@example.com']);
+const sentAttachments = sentMail?.attachments;
+assert.ok(Array.isArray(sentAttachments));
+assert.equal(sentAttachments.length, 2);
+globalThis.fetch = originalFetch;
+delete process.env.RESEND_API_KEY;
+delete process.env.BUG_REPORT_EMAIL;
 const { createCanvas } = createRequire(path.join(pdfRoot, 'package.json'))(
   '@napi-rs/canvas',
 );
@@ -510,6 +547,32 @@ assert.ok(
       block.kind === 'instruction' && block.label === 'Discussion Problems',
   ),
   'A split Discussion Problems heading is separate from the prior problem',
+);
+
+const subsectionSpans: Span[] = [
+  { text: '14.', x: 40, y: 70, w: 18, h: 10, baseline: 80, font: 'bold' },
+  { text: '4.1.2', x: 40, y: 150, w: 38, h: 13, baseline: 163, font: 'bold' },
+  { text: 'Homogeneous Equations', x: 84, y: 150, w: 150, h: 13, baseline: 163, font: 'bold' },
+  { text: '15.', x: 40, y: 190, w: 18, h: 10, baseline: 200, font: 'bold' },
+];
+assert.ok(
+  detectPage(
+    {
+      page: 1,
+      width: 600,
+      height: 400,
+      spans: subsectionSpans,
+      body: { x: 32, y: 50, w: 250, h: 190 },
+      columns: [],
+      regions: [{ x: 32, y: 50, w: 250, h: 190, columns: [] }],
+    },
+    splitHeadingInk,
+  ).some(
+    (block) =>
+      block.kind === 'instruction' &&
+      block.label === '4.1.2 Homogeneous Equations',
+  ),
+  'A numbered exercise subsection is a separate heading block',
 );
 
 const mkProblem = (label: string, page: number): Block => ({
