@@ -114,12 +114,6 @@ export function layoutBook(blocks: Block[], settings: Settings): Placement[] {
       if (y + contentHeight + answerHeight > limit + 0.01) {
         nextColumn();
         y = columnY[col];
-        // A preceding full-width placement can leave every output column at
-        // the same filled height. Advancing just one column is then not enough.
-        if (y + contentHeight + answerHeight > limit + 0.01 && y > top) {
-          nextPage();
-          y = top;
-        }
       }
     }
     placements.push({

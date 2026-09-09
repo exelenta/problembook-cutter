@@ -190,22 +190,22 @@ export function inferLayout(
     if (whitespace[0]) top = (whitespace[0].a + whitespace[0].b) / 2;
   }
   const section =
-    textLines(spans, initial).find(
+    initialRuns.find(
       (run) =>
         run.y > top + 70 &&
         /^\s*\d+\.\d+\s+[A-Z][\p{L}-]+/u.test(run.text) &&
-        run.h >= 10,
+        run.h >= 14,
     ) ??
     spans.find(
       (span) =>
         span.y > top + 70 &&
         /^\d+\.\d+$/.test(span.text.trim()) &&
-        span.h >= 10 &&
+        span.h >= 14 &&
         spans.some(
           (title) =>
             title.x > right(span) &&
             Math.abs(title.baseline - span.baseline) < 3 &&
-            title.h >= 10 &&
+            title.h >= 12 &&
             /^[A-Z][\p{L}-]+/u.test(title.text.trim()),
         ),
     );
@@ -277,9 +277,7 @@ export function inferLayout(
       if (
         run.x >= divider - 14 ||
         right(run) <= divider + 14 ||
-        run.w <= body.w * 0.55 ||
-        divider - run.x <= body.w * 0.18 ||
-        right(run) - divider <= body.w * 0.18
+        run.w <= body.w * 0.32
       )
         return false;
       const ordered = [...run.spans].sort((a, b) => a.x - b.x),
@@ -298,10 +296,38 @@ export function inferLayout(
       a: Math.max(body.y, run.y - 3),
       b: Math.min(bottom(body), bottom(run) + 3),
     }));
-  // A horizontal rule is only decoration or a section separator, not evidence
-  // that the surrounding content switches to one column. Full-width layout
-  // bands therefore require text spanning the gutter. This avoids creating a
-  // thin, page-wide object for rules between exercise groups.
+  const longRuleThreshold = body.w * ink.scale * 0.35,
+    bodyX0 = Math.max(0, Math.floor(body.x * ink.scale)),
+    bodyX1 = Math.min(ink.width, Math.ceil(right(body) * ink.scale));
+  let ruleStart = -1;
+  for (
+    let y = Math.max(0, Math.floor(body.y * ink.scale));
+    y < Math.min(ink.height, Math.ceil(bottom(body) * ink.scale));
+    y++
+  ) {
+    let run = 0,
+      longest = 0;
+    for (let x = bodyX0; x < bodyX1; x++) {
+      if (ink.data[y * ink.width + x]) {
+        run++;
+        longest = Math.max(longest, run);
+      } else run = 0;
+    }
+    const isRule = longest >= longRuleThreshold;
+    if (isRule && ruleStart < 0) ruleStart = y;
+    if (!isRule && ruleStart >= 0) {
+      candidates.push({
+        a: Math.max(body.y, ruleStart / ink.scale - 3),
+        b: Math.min(bottom(body), y / ink.scale + 3),
+      });
+      ruleStart = -1;
+    }
+  }
+  if (ruleStart >= 0)
+    candidates.push({
+      a: Math.max(body.y, ruleStart / ink.scale - 3),
+      b: bottom(body),
+    });
   candidates.sort((a, b) => a.a - b.a);
   const fullWidthBands: { a: number; b: number }[] = [];
   for (const candidate of candidates) {
@@ -409,45 +435,6 @@ function textRuns(spans: Span[], r: Rect): TextRun[] {
   }
   return runs;
 }
-function textLines(spans: Span[], r: Rect): TextRun[] {
-  const inside = spans
-    .filter(
-      (t) =>
-        t.x >= r.x &&
-        t.x < right(r) &&
-        t.baseline >= r.y &&
-        t.baseline < bottom(r),
-    )
-    .sort((a, b) => a.baseline - b.baseline || a.x - b.x);
-  const rows: Span[][] = [];
-  for (const span of inside) {
-    const row = rows.findLast(
-      (candidate) => Math.abs(candidate[0].baseline - span.baseline) < 3,
-    );
-    if (row) row.push(span);
-    else rows.push([span]);
-  }
-  return rows.map((row) => {
-    row.sort((a, b) => a.x - b.x);
-    const x = Math.min(...row.map((s) => s.x)),
-      y = Math.min(...row.map((s) => s.y)),
-      end = Math.max(...row.map(right)),
-      low = Math.max(...row.map(bottom));
-    return {
-      x,
-      y,
-      w: end - x,
-      h: low - y,
-      baseline: row[0].baseline,
-      text: row
-        .map((s) => s.text.trim())
-        .filter(Boolean)
-        .join(' '),
-      font: row.map((s) => s.font).join(' '),
-      spans: row,
-    };
-  });
-}
 function events(spans: Span[], r: Rect): Event[] {
   const inside = spans.filter(
     (t) =>
@@ -522,28 +509,6 @@ function events(spans: Span[], r: Rect): Event[] {
         label: run.text,
       });
   }
-  // Display headings are frequently split into separate PDF text spans with a
-  // large artificial gap (for example "Discussion" + "Problems"). Recombine
-  // the complete visual line so the heading becomes its own block rather than
-  // being swallowed by the preceding problem.
-  for (const line of textLines(inside, r)) {
-    const heading = line.text.match(
-      /^(EXERCISES?\b.*|Discussion\s+Problems\b.*|Computer\s+Lab\s+Assignments\b.*)$/i,
-    )?.[1];
-    if (
-      heading &&
-      !es.some(
-        (e) =>
-          e.kind === 'instruction' &&
-          Math.abs(e.span.baseline - line.baseline) < 3,
-      )
-    )
-      es.push({
-        span: { ...line, text: heading },
-        kind: 'instruction',
-        label: heading,
-      });
-  }
   return es
     .filter(
       (e, i) =>
@@ -580,11 +545,7 @@ export function detectPage(info: PageInfo, ink: Ink): Block[] {
       const col = { ...region, x: bounds[c], w: bounds[c + 1] - bounds[c] };
       const es = events(info.spans, col);
       const make = (r: Rect, e?: Event, extra: string[] = []) => {
-        const tight = trim(ink, r, 2);
-        // Keep the source column width. Stable left/right edges make split and
-        // continuation fragments line up in the output while vertical trimming
-        // still removes unused space above and below each block.
-        const crop = { x: r.x, y: tight.y, w: r.w, h: tight.h };
+        const crop = trim(ink, r, 2);
         if (!projection(ink, crop, 'y').some((v) => v > 0)) return;
         const label =
           e &&
@@ -606,7 +567,7 @@ export function detectPage(info: PageInfo, ink: Ink): Block[] {
       };
       if (!es.length) {
         make(col, undefined, [
-          '단 또는 페이지 앞부분입니다. 이전 문제와 이어지는지 확인하세요',
+          '문제 번호를 찾지 못했습니다. 영역을 직접 분할하세요',
         ]);
         continue;
       }
@@ -668,44 +629,21 @@ export function detectPage(info: PageInfo, ink: Ink): Block[] {
 }
 export function linkContinuations(blocks: Block[]): Block[] {
   const out: Block[] = [];
-  for (let index = 0; index < blocks.length; index++) {
-    const b = blocks[index];
+  for (const b of blocks) {
     const prev = out.at(-1);
-    const page = b.fragments[0]?.page;
-    const nextProblem = blocks
-      .slice(index + 1)
-      .find(
-        (candidate) =>
-          candidate.fragments[0]?.page === page &&
-          candidate.kind === 'problem' &&
-          Number.isFinite(Number(candidate.label)),
-      );
-    const expectedPrevious = nextProblem
-      ? String(Number(nextProblem.label) - 1)
-      : undefined;
-    const numberedTarget = expectedPrevious
-      ? out.findLast(
-          (candidate) =>
-            candidate.kind === 'problem' &&
-            candidate.label === expectedPrevious,
-        )
-      : undefined;
-    const target = numberedTarget ?? prev;
     if (
       b.kind === 'unassigned' &&
-      target &&
-      (target.kind === 'problem' ||
-        (target.kind === 'instruction' && !!target.range)) &&
+      prev &&
+      prev.kind !== 'unassigned' &&
       b.warnings.some((w) => w.includes('앞부분'))
     ) {
-      const targetIndex = out.findLastIndex((candidate) => candidate === target);
-      out[targetIndex] = {
-        ...target,
-        fragments: [...target.fragments, ...b.fragments],
+      out[out.length - 1] = {
+        ...prev,
+        fragments: [...prev.fragments, ...b.fragments],
         reviewed: false,
         warnings: [
-          ...target.warnings,
-          `${target.kind === 'instruction' ? '공통 지시문' : '문제'}의 이어지는 조각을 임시 연결했습니다. 연결이 맞는지 확인하세요`,
+          ...prev.warnings,
+          `${prev.kind === 'instruction' ? '공통 지시문' : '문제'}의 이어지는 조각을 임시 연결했습니다. 연결이 맞는지 확인하세요`,
         ],
       };
     } else out.push(b);
@@ -717,23 +655,15 @@ export function numberAudit(blocks: Block[]) {
     .filter((b) => b.kind === 'problem')
     .map((b) => Number(b.label))
     .filter(Number.isFinite);
-  const groups: number[][] = [];
-  for (const number of numbers) {
-    const group = groups.at(-1);
-    if (!group || number < group.at(-1)!) groups.push([number]);
-    else group.push(number);
-  }
-  const duplicates = groups.flatMap((group) =>
-    group.filter((n, i) => group.indexOf(n) !== i),
-  );
+  const duplicates = numbers.filter((n, i) => numbers.indexOf(n) !== i);
   const missing: number[] = [];
-  for (const group of groups) {
+  if (numbers.length) {
     for (
-      let n = Math.min(...group);
-      n <= Math.max(...group) && missing.length < 100;
+      let n = Math.min(...numbers);
+      n <= Math.max(...numbers) && missing.length < 100;
       n++
     )
-      if (!group.includes(n)) missing.push(n);
+      if (!numbers.includes(n)) missing.push(n);
   }
   return { missing, duplicates: [...new Set(duplicates)] };
 }
